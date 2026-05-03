@@ -36,6 +36,6 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: |
             werikoliveira/email:latest
-            werikoliveira/email:0.3.16
+            werikoliveira/email:0.3.17
           cache-from: type=gha
           cache-to: type=gha,mode=max

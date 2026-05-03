@@ -7,6 +7,7 @@ import { simpleParser } from "mailparser";
 import nodemailer from "nodemailer";
 import { createClient } from "@supabase/supabase-js";
 import fs from "fs/promises";
+import dns from "dns/promises";
 import "dotenv/config";
 
 // --- Configuração de Armazenamento Local ---
@@ -512,23 +513,29 @@ async function startServer() {
         // Tentar cada relay até um funcionar (Failover)
         for (let i = 0; i < availableRelays.length; i++) {
           const relay = availableRelays[i];
+          const sanitizedHost = (relay.host || "").trim();
+          
           try {
-            await addLog(`Tentando relay #${i + 1}: ${relay.name || relay.host}`, "smtp");
+            await addLog(`Tentando relay #${i + 1}: ${relay.name || sanitizedHost}`, "smtp");
             
-            // Debug DNS
+            // Debug DNS e Forçar IPv4 se necessário
             try {
-              const { family } = await dns.lookup(relay.host);
-              await addLog(`DNS OK para ${relay.host} (IPv${family})`, "info");
+              const lookup = await dns.lookup(sanitizedHost, { family: 4 });
+              await addLog(`DNS Resolvido: ${sanitizedHost} -> ${lookup.address}`, "info");
             } catch (dnsErr: any) {
-              await addLog(`DNS FALHA para ${relay.host}: ${dnsErr.message}`, "error");
+              await addLog(`DNS FALHA Crítica para ${sanitizedHost}: ${dnsErr.message}`, "error");
+              // Continuar tentando, as vezes o nodemailer consegue onde o lookup direto falha
             }
 
             const transporter = nodemailer.createTransport({
-              host: relay.host,
+              host: sanitizedHost,
               port: parseInt(relay.port),
               secure: relay.port == 465,
               auth: { user: relay.user, pass: relay.pass },
-              timeout: 10000 // 10 segundos de timeout por relay
+              timeout: 15000, // Aumentado para 15s
+              connectionTimeout: 10000,
+              greetingTimeout: 10000,
+              dnsTimeout: 10000
             });
 
             // IDs de rastreio agora podem carregar o campaignId
