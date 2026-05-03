@@ -179,7 +179,10 @@ async function startServer() {
       const transporter = nodemailer.createTransport({
         host: "localhost",
         port: SMTP_PORT,
-        secure: false
+        secure: false,
+        tls: {
+          rejectUnauthorized: false
+        }
       });
       await transporter.sendMail({
         from: '"ZimaMail" <system@zimamail.local>',
