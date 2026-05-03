@@ -29,6 +29,6 @@ jobs:
           context: .
           push: true
           tags: |
-            werikoliveira/email:0.1
+            werikoliveira/email:0.2
           cache-from: type=gha
           cache-to: type=gha,mode=max

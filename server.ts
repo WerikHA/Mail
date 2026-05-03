@@ -46,6 +46,16 @@ async function startServer() {
     ]);
   });
 
+  // Endpoint dinâmico para variáveis de ambiente (ZimaOS Runtime)
+  app.get("/env.js", (req, res) => {
+    const config = {
+      VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "",
+      VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || ""
+    };
+    res.type("application/javascript");
+    res.send(`window.ZIMA_ENV = ${JSON.stringify(config)};`);
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
