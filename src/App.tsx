@@ -48,12 +48,17 @@ export default function App() {
   const [accounts, setAccounts] = useState<MailAccount[]>([]);
   const [isFetchingAccounts, setIsFetchingAccounts] = useState(false);
 
-  // Mock de emails para a interface profissional
-  const [emails, setEmails] = useState([
-    { id: 1, from: 'Suporte ZimaOS', subject: 'Boas-vindas ao seu novo Provedor', snippet: 'Seu servidor de email profissional está configurado e pronto para uso. Lembre-se de configurar o DNS corretamente.', date: '10:30', read: false },
-    { id: 2, from: 'Segurança Supabase', subject: 'Chaves de API sincronizadas', snippet: 'A sincronização entre o Stalwart e o Supabase foi concluída com sucesso. Seus metadados estão protegidos.', date: 'Ontem', read: true },
-    { id: 3, from: 'Noreply @ GitHub', subject: 'Novo Deploy Detectado', snippet: 'A build do seu dashboard terminou sem erros. Versão 2.4.0-stable ativa.', date: '2 dias atrás', read: true },
-  ]);
+  const [emails, setEmails] = useState<any[]>([]);
+
+  const fetchEmails = useCallback(async () => {
+    try {
+      const res = await fetch('/api/mail/inbox');
+      const data = await res.json();
+      setEmails(data);
+    } catch (err) {
+      console.error('Erro ao buscar emails:', err);
+    }
+  }, []);
 
   const fetchAccounts = useCallback(async () => {
     if (!supabase) {
@@ -93,7 +98,14 @@ export default function App() {
       .catch(() => setLoading(false));
 
     fetchAccounts();
-  }, [fetchAccounts]);
+    fetchEmails();
+
+    const interval = setInterval(() => {
+      fetchEmails();
+    }, 10000); // Polling simples a cada 10s
+
+    return () => clearInterval(interval);
+  }, [fetchAccounts, fetchEmails]);
 
   const handleDeleteAccount = async (id: string) => {
     if (!supabase) return;
@@ -226,7 +238,7 @@ export default function App() {
                       </div>
                       
                       <div className="space-y-4">
-                        <ServiceItem name="SMTP Server (Stalwart)" status="running" port={25} />
+                        <ServiceItem name="SMTP Engine (Custom Node.js)" status="running" port={25} />
                         <ServiceItem name="IMAP Core" status="running" port={993} />
                         <ServiceItem name="Supabase DB Connection" status="running" type="External" />
                         <ServiceItem name="Spam Filter (Rspamd)" status="warning" message="Atualizando bases..." />
@@ -297,7 +309,7 @@ export default function App() {
                   </button>
                   
                   <nav className="space-y-1">
-                    <MailFolderItem label="Entrada" count={2} active icon={<Mail className="w-4 h-4" />} />
+                    <MailFolderItem label="Entrada" count={emails.filter(e => !e.read).length} active icon={<Mail className="w-4 h-4" />} />
                     <MailFolderItem label="Enviados" icon={<ArrowRight className="w-4 h-4" rotate={-45} />} />
                     <MailFolderItem label="Rascunhos" icon={<Shield className="w-4 h-4" />} />
                     <MailFolderItem label="Lixeira" icon={<AlertCircle className="w-4 h-4" />} />
@@ -313,11 +325,11 @@ export default function App() {
                       className={`w-full p-4 border-b border-slate-50 text-left hover:bg-slate-50 transition-colors ${selectedEmail?.id === email.id ? 'bg-blue-50/50 border-l-4 border-l-blue-600' : ''}`}
                     >
                       <div className="flex justify-between items-center mb-1">
-                        <span className={`text-sm ${!email.read ? 'font-bold text-slate-900' : 'text-slate-600'}`}>{email.from}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{email.date}</span>
+                        <span className={`text-sm ${!email.read ? 'font-bold text-slate-900' : 'text-slate-600'}`}>{email.from_addr || email.from}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">{new Date(email.received_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
                       <p className={`text-xs truncate ${!email.read ? 'font-bold text-slate-800' : 'text-slate-500'}`}>{email.subject}</p>
-                      <p className="text-[10px] text-slate-400 truncate mt-1">{email.snippet}</p>
+                      <p className="text-[10px] text-slate-400 truncate mt-1">{email.body?.replace(/<[^>]*>/g, '').substring(0, 100)}</p>
                     </button>
                   ))}
                 </div>
@@ -331,9 +343,9 @@ export default function App() {
                           <h2 className="text-xl font-bold text-slate-900 mb-2">{selectedEmail.subject}</h2>
                           <div className="flex items-center gap-2 text-sm text-slate-500">
                             <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center font-bold text-blue-600">
-                              {selectedEmail.from.charAt(0)}
+                              {(selectedEmail.from_addr || selectedEmail.from).charAt(0)}
                             </div>
-                            <span>{selectedEmail.from}</span>
+                            <span>{selectedEmail.from_addr || selectedEmail.from}</span>
                           </div>
                         </div>
                         <div className="flex gap-2">
@@ -341,13 +353,7 @@ export default function App() {
                           <button className="p-2 hover:bg-slate-100 rounded-lg text-slate-400"><Shield className="w-4 h-4" /></button>
                         </div>
                       </div>
-                      <div className="prose prose-slate max-w-none text-slate-600 leading-relaxed">
-                        <p>{selectedEmail.snippet}</p>
-                        <p className="mt-4">
-                          Esta é uma ferramenta profissional de email rodando no seu ZimaOS. 
-                          Os dados estão seguros no Supabase e os arquivos de armazenamento estão em /DATA/AppData/ZimaMail.
-                        </p>
-                      </div>
+                      <div className="prose prose-slate max-w-none text-slate-600 leading-relaxed bg-slate-50 p-6 rounded-2xl border border-slate-100" dangerouslySetInnerHTML={{ __html: selectedEmail.body }} />
                     </div>
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-slate-400">
@@ -586,6 +592,33 @@ function MailFolderItem({ label, count, active, icon }: { label: string, count?:
 }
 
 function ComposeModal({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) {
+  const [to, setTo] = useState("");
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      const res = await fetch("/api/mail/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to, subject, body })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert("Email enviado com sucesso!");
+        onClose();
+      } else {
+        alert("Erro ao enviar: " + data.message);
+      }
+    } catch (err) {
+      alert("Falha na conexão com o motor de email.");
+    } finally {
+      setSending(false);
+    }
+  };
+
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
@@ -599,13 +632,37 @@ function ComposeModal({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
           <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-lg text-slate-500">×</button>
         </div>
         <div className="p-6 space-y-4">
-          <input type="text" placeholder="Para:" className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
-          <input type="text" placeholder="Assunto:" className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
-          <textarea rows={8} placeholder="Escreva sua mensagem..." className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"></textarea>
+          <input 
+            type="text" 
+            placeholder="Para:" 
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20" 
+          />
+          <input 
+            type="text" 
+            placeholder="Assunto:" 
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20" 
+          />
+          <textarea 
+            rows={8} 
+            placeholder="Escreva sua mensagem..." 
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
+          ></textarea>
         </div>
         <div className="p-4 bg-slate-50 flex justify-end gap-3">
           <button onClick={onClose} className="px-6 py-2 text-slate-500 font-medium">Cancelar</button>
-          <button className="px-8 py-2 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-500/20">Enviar Agora</button>
+          <button 
+            onClick={handleSend}
+            disabled={sending}
+            className="px-8 py-2 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-500/20 disabled:opacity-50"
+          >
+            {sending ? "Enviando..." : "Enviar Agora"}
+          </button>
         </div>
       </motion.div>
     </div>

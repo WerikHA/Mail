@@ -12,8 +12,11 @@ COPY . .
 # Faz o build do painel frontend
 RUN npm run build
 
-# O servidor Express/Vite vai rodar na porta 3000
+# O servidor Express vai rodar na porta 3000, o SMTP na porta 2525
 EXPOSE 3000
+EXPOSE 2525
+EXPOSE 587
+EXPOSE 465
 
 # Define variáveis de ambiente padrão (podem ser sobrescritas no ZimaOS)
 ENV NODE_ENV=production
