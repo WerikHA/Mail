@@ -26,15 +26,24 @@ async function initStorage() {
       { path: ACCOUNTS_FILE, default: [] },
       { path: LOGS_FILE, default: [] },
       { path: SETTINGS_FILE, default: { 
-        smtp_host: "", 
-        smtp_port: 587, 
-        smtp_user: "", 
-        smtp_pass: "", 
-        domain: "amplifamarketing.com.br",
-        delivery_mode: "internal" 
+        smtp_host: process.env.SMTP_HOST || "", 
+        smtp_port: parseInt(process.env.SMTP_PORT || "587"), 
+        smtp_user: process.env.SMTP_USER || "", 
+        smtp_pass: process.env.SMTP_PASS || "", 
+        domain: process.env.DEFAULT_DOMAIN || "amplifamarketing.com.br",
+        delivery_mode: process.env.DELIVERY_MODE || "internal",
+        cf_token: process.env.CF_TOKEN || "",
+        cf_zone: process.env.CF_ZONE || ""
       } },
-      { path: DOMAINS_FILE, default: ["amplifamarketing.com.br"] },
-      { path: RELAYS_FILE, default: [] }
+      { path: DOMAINS_FILE, default: [process.env.DEFAULT_DOMAIN || "amplifamarketing.com.br"] },
+      { path: RELAYS_FILE, default: process.env.SMTP_HOST ? [{
+        id: "default",
+        name: "Relay de Ambiente",
+        host: process.env.SMTP_HOST,
+        port: process.env.SMTP_PORT || "587",
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+      }] : [] }
     ];
     for (const file of files) {
       try {
