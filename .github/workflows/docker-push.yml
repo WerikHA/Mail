@@ -28,6 +28,10 @@ jobs:
       - name: Configurar Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Extract version from package.json
+        id: package_version
+        run: echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
       - name: Build e Push
         uses: docker/build-push-action@v6
         with:
@@ -36,6 +40,6 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: |
             werikoliveira/email:latest
-            werikoliveira/email:0.3.17
+            werikoliveira/email:${{ steps.package_version.outputs.VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

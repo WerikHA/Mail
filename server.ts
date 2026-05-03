@@ -60,7 +60,7 @@ async function initStorage() {
   }
 }
 
-async function addLog(message: string, type: "info" | "error" | "smtp" = "info") {
+async function addLog(message: string, type: "info" | "error" | "smtp" | "track" = "info") {
   try {
     const content = await fs.readFile(LOGS_FILE, "utf-8");
     const logs = JSON.parse(content);
@@ -513,30 +513,31 @@ async function startServer() {
         // Tentar cada relay até um funcionar (Failover)
         for (let i = 0; i < availableRelays.length; i++) {
           const relay = availableRelays[i];
-          const sanitizedHost = (relay.host || "").trim();
+          const sanitizedHost = (relay.host || "").trim().toLowerCase();
+          const sanitizedUser = (relay.user || "").trim();
+          const sanitizedPass = (relay.pass || "").trim();
           
           try {
             await addLog(`Tentando relay #${i + 1}: ${relay.name || sanitizedHost}`, "smtp");
             
-            // Debug DNS e Forçar IPv4 se necessário
+            // Debug DNS e Forçar IPv4
             try {
               const lookup = await dns.lookup(sanitizedHost, { family: 4 });
               await addLog(`DNS Resolvido: ${sanitizedHost} -> ${lookup.address}`, "info");
             } catch (dnsErr: any) {
-              await addLog(`DNS FALHA Crítica para ${sanitizedHost}: ${dnsErr.message}`, "error");
-              // Continuar tentando, as vezes o nodemailer consegue onde o lookup direto falha
+              await addLog(`DNS FALHA Crítica para ${sanitizedHost}: ${dnsErr.message}. Verifique se há espaços no host.`, "error");
             }
 
             const transporter = nodemailer.createTransport({
               host: sanitizedHost,
               port: parseInt(relay.port),
               secure: relay.port == 465,
-              auth: { user: relay.user, pass: relay.pass },
-              timeout: 15000, // Aumentado para 15s
+              auth: { user: sanitizedUser, pass: sanitizedPass },
+              timeout: 15000,
               connectionTimeout: 10000,
               greetingTimeout: 10000,
               dnsTimeout: 10000
-            });
+            } as any);
 
             // IDs de rastreio agora podem carregar o campaignId
             const trackingId = campaignId ? `c_${campaignId}_${Date.now()}` : `out_${Date.now()}`;

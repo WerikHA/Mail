@@ -249,21 +249,21 @@ export default function App() {
   };
 
   const renderCampaigns = () => (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="p-8 space-y-8">
-      <div className="flex justify-between items-center bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="p-4 md:p-8 space-y-8">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
         <div>
-          <h2 className="text-3xl font-black text-slate-900 tracking-tight">Campanhas</h2>
+          <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">Campanhas</h2>
           <p className="text-slate-400 text-sm">Gerencie disparos em massa e analise resultados</p>
         </div>
         <button 
           onClick={() => setIsCampaignModalOpen(true)}
-          className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-500/20 active:scale-95 transition-all flex items-center gap-2"
+          className="w-full sm:w-auto px-6 md:px-8 py-3 md:py-4 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
         >
           <Plus className="w-5 h-5" /> Criar Campanha
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-5">
            <div className="p-4 bg-blue-50 rounded-2xl text-blue-600">
              <BarChart3 className="w-8 h-8" />
@@ -293,8 +293,8 @@ export default function App() {
         </div>
       </div>
 
-      <div className="bg-white rounded-[40px] border border-slate-100 shadow-xl overflow-hidden">
-        <table className="w-full text-left">
+      <div className="bg-white rounded-[40px] border border-slate-100 shadow-xl overflow-x-auto">
+        <table className="w-full text-left min-w-[800px]">
           <thead className="bg-slate-50 border-b border-slate-100">
             <tr>
               <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Nome da Campanha</th>
@@ -353,30 +353,30 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-500/30">
-      {/* Sidebar navigation */}
-      <nav className="fixed left-0 top-0 h-full w-20 bg-white border-r border-slate-200 flex flex-col items-center py-8 gap-8 z-50 shadow-sm">
-        <div className="p-3 bg-blue-600 rounded-2xl shadow-lg shadow-blue-500/20">
+      {/* Sidebar navigation for desktop */}
+      <nav className="hidden md:flex fixed left-0 top-0 h-full w-20 bg-white border-r border-slate-200 flex-col items-center py-8 z-50 shadow-sm">
+        <div className="p-3 bg-blue-600 rounded-2xl shadow-lg shadow-blue-500/20 mb-10">
           <Mail className="w-8 h-8 text-white" />
         </div>
         
-        <div className="flex flex-col gap-4 mt-8">
+        <div className="flex flex-col gap-6">
           <NavButton 
             active={activeTab === 'overview'} 
             onClick={() => setActiveTab('overview')}
             icon={<LayoutDashboard className="w-6 h-6" />}
-            label="Overview"
+            label="Dashboard"
           />
           <NavButton 
             active={activeTab === 'mail'} 
             onClick={() => setActiveTab('mail')}
             icon={<Mail className="w-6 h-6" />}
-            label="Inbox"
+            label="Emails"
           />
           <NavButton 
             active={activeTab === 'dns'} 
             onClick={() => setActiveTab('dns')}
             icon={<Globe className="w-6 h-6" />}
-            label="Domains"
+            label="Domínios"
           />
           <NavButton 
             active={activeTab === 'campaigns'} 
@@ -400,7 +400,7 @@ export default function App() {
             active={activeTab === 'settings'} 
             onClick={() => setActiveTab('settings')}
             icon={<Settings className="w-6 h-6" />}
-            label="Settings"
+            label="Ajustes"
           />
         </div>
 
@@ -411,31 +411,60 @@ export default function App() {
         </div>
       </nav>
 
+      {/* Mobile Bottom Navigation */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-around items-center h-16 z-50 px-2 pb-safe">
+        <MobileNavButton 
+          active={activeTab === 'overview'} 
+          onClick={() => setActiveTab('overview')}
+          icon={<LayoutDashboard className="w-5 h-5" />}
+        />
+        <MobileNavButton 
+          active={activeTab === 'mail'} 
+          onClick={() => setActiveTab('mail')}
+          icon={<Mail className="w-5 h-5" />}
+        />
+        <MobileNavButton 
+          active={activeTab === 'dns'} 
+          onClick={() => setActiveTab('dns')}
+          icon={<Globe className="w-5 h-5" />}
+        />
+        <MobileNavButton 
+          active={activeTab === 'campaigns'} 
+          onClick={() => setActiveTab('campaigns')}
+          icon={<Zap className="w-5 h-5" />}
+        />
+        <MobileNavButton 
+          active={activeTab === 'settings'} 
+          onClick={() => setActiveTab('settings')}
+          icon={<Settings className="w-5 h-5" />}
+        />
+      </nav>
+
       {/* Main Content */}
-      <main className="pl-20">
-        <header className="p-8 border-b border-slate-200 flex justify-between items-center bg-white/80 backdrop-blur-xl sticky top-0 z-40">
+      <main className="md:pl-20 pb-20 md:pb-0">
+        <header className="p-4 md:p-8 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white/80 backdrop-blur-xl sticky top-0 z-40">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
+            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900 flex items-center flex-wrap gap-2">
               <Server className="w-6 h-6 text-blue-600" />
               ZimaMail Provider
-              <span className="text-xs bg-emerald-500/10 text-emerald-600 px-2 py-0.5 rounded-full border border-emerald-500/20 font-medium ml-2 uppercase tracking-widest">
+              <span className="text-[10px] bg-emerald-500/10 text-emerald-600 px-2 py-0.5 rounded-full border border-emerald-500/20 font-medium uppercase tracking-widest">
                 Production
               </span>
             </h1>
-            <p className="text-slate-500 text-sm mt-1">Infraestrutura gerenciada por Docker no ZimaOS</p>
+            <p className="text-slate-500 text-xs md:text-sm mt-1">Infraestrutura gerenciada por Docker no ZimaOS</p>
           </div>
 
-          <div className="flex gap-4">
-            <button onClick={() => setActiveTab('logs')} className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 rounded-lg border border-slate-200 text-sm font-medium transition-all shadow-sm">
-              Logs do Sistema
+          <div className="flex gap-2 md:gap-4 w-full sm:w-auto">
+            <button onClick={() => setActiveTab('logs')} className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 rounded-lg border border-slate-200 text-xs md:text-sm font-medium transition-all shadow-sm">
+              Logs
             </button>
-            <button onClick={() => setIsAccountModalOpen(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-all shadow-lg shadow-blue-500/10">
+            <button onClick={() => setIsAccountModalOpen(true)} className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs md:text-sm font-medium transition-all shadow-lg shadow-blue-500/10 whitespace-nowrap">
               Nova Conta
             </button>
           </div>
         </header>
 
-        <section className="p-8 max-w-7xl mx-auto">
+        <section className="p-4 md:p-8 max-w-7xl mx-auto">
           <AnimatePresence mode="wait">
             {activeTab === 'overview' && (
               <motion.div 
@@ -604,10 +633,10 @@ export default function App() {
                 key="mail"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="grid grid-cols-12 gap-0 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden min-h-[600px]"
+                className="grid grid-cols-1 lg:grid-cols-12 gap-0 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden min-h-[600px]"
               >
                 {/* Mail Sidebar */}
-                <div className="col-span-3 border-r border-slate-100 bg-slate-50/50 p-4">
+                <div className={`${selectedEmail ? 'hidden lg:block' : 'block'} lg:col-span-3 border-r border-slate-100 bg-slate-50/50 p-4`}>
                   <button 
                     onClick={() => setIsComposeOpen(true)}
                     className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-500/20 mb-6 flex items-center justify-center gap-2 hover:bg-blue-700 transition-all"
@@ -624,7 +653,7 @@ export default function App() {
                 </div>
 
                 {/* Email List */}
-                <div className="col-span-4 border-r border-slate-100 overflow-y-auto max-h-[700px]">
+                <div className={`${selectedEmail ? 'hidden lg:block' : 'block'} lg:col-span-4 border-r border-slate-100 overflow-y-auto max-h-[700px]`}>
                   {emails.map(email => (
                     <button 
                       key={email.id}
@@ -642,25 +671,30 @@ export default function App() {
                 </div>
 
                 {/* Content Reader */}
-                <div className="col-span-5 p-8 bg-white overflow-y-auto max-h-[700px]">
+                <div className={`${selectedEmail ? 'block' : 'hidden lg:block'} lg:col-span-5 p-4 md:p-8 bg-white overflow-y-auto max-h-[700px]`}>
                   {selectedEmail ? (
                     <div className="animate-in fade-in duration-300">
-                      <div className="flex justify-between items-start mb-8">
-                        <div>
-                          <h2 className="text-xl font-bold text-slate-900 mb-2">{selectedEmail.subject}</h2>
-                          <div className="flex items-center gap-2 text-sm text-slate-500">
-                            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center font-bold text-blue-600">
-                              {(selectedEmail.from_addr || selectedEmail.from).charAt(0)}
+                      <div className="flex flex-col md:flex-row md:justify-between items-start mb-8 gap-4">
+                        <div className="flex items-center gap-4">
+                          <button onClick={() => setSelectedEmail(null)} className="lg:hidden p-2 hover:bg-slate-100 rounded-lg">
+                            <X className="w-5 h-5 text-slate-400" />
+                          </button>
+                          <div>
+                            <h2 className="text-xl font-bold text-slate-900 mb-2">{selectedEmail.subject}</h2>
+                            <div className="flex items-center gap-2 text-sm text-slate-500">
+                              <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center font-bold text-blue-600 shrink-0">
+                                {(selectedEmail.from_addr || selectedEmail.from).charAt(0)}
+                              </div>
+                              <span className="truncate max-w-[200px]">{selectedEmail.from_addr || selectedEmail.from}</span>
                             </div>
-                            <span>{selectedEmail.from_addr || selectedEmail.from}</span>
                           </div>
                         </div>
-                        <div className="flex gap-2">
-                          <button className="p-2 hover:bg-slate-100 rounded-lg text-slate-400"><ArrowRight className="w-4 h-4" /></button>
-                          <button className="p-2 hover:bg-slate-100 rounded-lg text-slate-400"><Shield className="w-4 h-4" /></button>
+                        <div className="flex gap-2 w-full md:w-auto">
+                          <button className="flex-1 md:flex-none p-2 hover:bg-slate-100 rounded-lg text-slate-400 border md:border-none flex justify-center"><ArrowRight className="w-4 h-4" /></button>
+                          <button className="flex-1 md:flex-none p-2 hover:bg-slate-100 rounded-lg text-slate-400 border md:border-none flex justify-center"><Shield className="w-4 h-4" /></button>
                         </div>
                       </div>
-                      <div className="prose prose-slate max-w-none text-slate-600 leading-relaxed bg-slate-50 p-6 rounded-2xl border border-slate-100" dangerouslySetInnerHTML={{ __html: selectedEmail.body }} />
+                      <div className="prose prose-slate max-w-none text-slate-600 leading-relaxed bg-slate-50 p-4 md:p-6 rounded-2xl border border-slate-100 overflow-x-auto" dangerouslySetInnerHTML={{ __html: selectedEmail.body }} />
                     </div>
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-slate-400">
@@ -681,8 +715,8 @@ export default function App() {
                 className="max-w-5xl mx-auto space-y-6"
               >
                 {/* Domain Manager */}
-                <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm">
-                  <div className="flex justify-between items-center mb-8">
+                <div className="bg-white border border-slate-200 rounded-3xl p-4 md:p-8 shadow-sm">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-8">
                     <div>
                       <h2 className="text-2xl font-black text-slate-900 tracking-tight">Gerenciamento de Domínios</h2>
                       <p className="text-sm text-slate-500">Adicione os domínios que seu servidor irá gerenciar</p>
@@ -692,12 +726,12 @@ export default function App() {
                       const input = (e.target as any).domain;
                       addDomain(input.value);
                       input.value = '';
-                    }} className="flex gap-2">
+                    }} className="flex gap-2 w-full sm:w-auto">
                        <input 
                         name="domain"
                         type="text" 
                         placeholder="ex: novo-dominio.com"
-                        className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20"
+                        className="flex-1 sm:w-64 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20"
                        />
                        <button className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition-all">
                         <Plus className="w-4 h-4" />
@@ -748,8 +782,8 @@ export default function App() {
                   <DeliverabilityCheck title="rDNS" status="warning" desc="DNS Reverso (Falar com host)." />
                 </div>
 
-                <div className="bg-slate-900 rounded-[2.5rem] p-10 text-white shadow-2xl shadow-blue-900/10">
-                  <div className="flex justify-between items-center mb-10">
+                <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-10 text-white shadow-2xl shadow-blue-900/10">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-10">
                     <div>
                       <h3 className="text-2xl font-black mb-2">Configuração Técnica</h3>
                       <p className="text-slate-400 text-sm">Aponte estes registros no seu provedor de domínio</p>
@@ -774,7 +808,7 @@ export default function App() {
                             btn.innerHTML = originalText;
                           }
                         }}
-                        className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl shadow-blue-500/20 disabled:opacity-50"
+                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl shadow-blue-500/20 disabled:opacity-50"
                       >
                         <Zap className="w-4 h-4" /> Sincronizar Cloudflare
                       </button>
@@ -1323,24 +1357,45 @@ export default function App() {
   );
 }
 
+function MobileNavButton({ active, onClick, icon }: { active: boolean, onClick: () => void, icon: any }) {
+  return (
+    <button 
+      onClick={onClick}
+      className={`flex flex-col items-center justify-center flex-1 py-1 transition-all ${
+        active ? 'text-blue-600' : 'text-slate-400'
+      }`}
+    >
+      <div className={`p-2 rounded-xl transition-all ${active ? 'bg-blue-50' : ''}`}>
+        {icon}
+      </div>
+      {active && <div className="w-1 h-1 rounded-full bg-blue-600 mt-0.5" />}
+    </button>
+  );
+}
+
 function NavButton({ active, icon, label, onClick }: { active: boolean, icon: any, label?: string, onClick: () => void }) {
   return (
     <button 
       onClick={onClick}
-      className={`group/nav relative flex items-center justify-center p-3 rounded-2xl transition-all duration-300 w-12 h-12 hover:w-32 hover:justify-start hover:px-4 ${
+      className={`group/nav relative flex items-center justify-center p-3 rounded-2xl transition-all duration-300 w-12 h-12 ${
         active 
-          ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' 
+          ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30' 
           : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'
       }`}
     >
       <div className="shrink-0">{icon}</div>
-      <span className={`ml-3 font-bold text-xs opacity-0 group-hover/nav:opacity-100 transition-opacity whitespace-nowrap overflow-hidden ${active ? 'text-white' : 'text-slate-600'}`}>
-        {label}
-      </span>
+      
+      {label && (
+        <div className="absolute left-full ml-4 px-3 py-2 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest rounded-xl opacity-0 group-hover/nav:opacity-100 transition-all translate-x-[-10px] group-hover/nav:translate-x-0 pointer-events-none whitespace-nowrap z-[100] shadow-2xl shadow-slate-900/40 border border-white/10 backdrop-blur-md">
+          {label}
+          <div className="absolute top-1/2 -left-1.5 -translate-y-1/2 w-3 h-3 bg-slate-900 rotate-45 rounded-sm" />
+        </div>
+      )}
+
       {active && (
         <motion.div 
           layoutId="activeTabIndicator"
-          className="absolute -right-1 w-1.5 h-8 bg-blue-600 rounded-l-full"
+          className="absolute -right-4 w-1.5 h-8 bg-blue-600 rounded-l-full shadow-[0_0_15px_-3px_rgba(37,99,235,0.4)]"
         />
       )}
     </button>
@@ -1539,8 +1594,8 @@ function RelayModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: 
               />
             </div>
             
-            <div className="grid grid-cols-3 gap-4">
-              <div className="col-span-2 space-y-1.5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="sm:col-span-2 space-y-1.5">
                 <label className="block text-xs font-black text-slate-400 uppercase ml-1">Host SMTP</label>
                 <input 
                   required
@@ -1551,7 +1606,7 @@ function RelayModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: 
                   className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 text-sm transition-all" 
                 />
               </div>
-              <div className="col-span-1 space-y-1.5">
+              <div className="sm:col-span-1 space-y-1.5">
                 <label className="block text-xs font-black text-slate-400 uppercase ml-1">Porta</label>
                 <input 
                   required
@@ -2017,17 +2072,17 @@ function DNSRowDark({ type, host, content, priority, desc }: any) {
 
 function StatCard({ title, value, subtitle, icon, trend, progress, iconColor }: any) {
   return (
-    <div className="bg-white border border-slate-200 rounded-[32px] p-6 hover:border-blue-200 transition-all group shadow-sm flex items-center gap-6">
+    <div className="bg-white border border-slate-200 rounded-[32px] p-6 hover:border-blue-200 transition-all group shadow-sm flex flex-col sm:flex-row items-center gap-4 md:gap-6">
       <div className={`p-4 bg-slate-50 rounded-2xl group-hover:bg-blue-600 group-hover:text-white transition-all group-hover:scale-110 ${iconColor}`}>
         {icon}
       </div>
-      <div>
-        <div className="flex items-center gap-2 mb-1">
+      <div className="text-center sm:text-left">
+        <div className="flex items-center justify-center sm:justify-start gap-2 mb-1">
           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">{title}</span>
           {trend && <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-600 text-[8px] font-black rounded shadow-sm">{trend}</span>}
         </div>
-        <div className="flex items-baseline gap-2">
-          <h4 className="text-4xl font-black text-slate-900 tracking-tighter leading-none">{value}</h4>
+        <div className="flex items-baseline justify-center sm:justify-start gap-2">
+          <h4 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tighter leading-none">{value}</h4>
           {subtitle && <span className="text-slate-400 text-[10px] font-bold">{subtitle}</span>}
         </div>
       </div>
