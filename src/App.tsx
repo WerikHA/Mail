@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, FormEvent } from 'react';
 import { 
   Mail, 
   Shield, 
@@ -10,9 +10,15 @@ import {
   ArrowRight,
   CheckCircle2,
   AlertCircle,
-  HardDrive
+  HardDrive,
+  Plus,
+  Trash2,
+  RefreshCw,
+  Search,
+  MoreVertical
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from './lib/supabase';
 
 // Tipos simplificados
 interface Stats {
@@ -23,12 +29,24 @@ interface Stats {
   storageAvailable: string;
 }
 
+interface MailAccount {
+  id: string;
+  email: string;
+  full_name: string;
+  domain: string;
+  created_at: string;
+  is_active: boolean;
+}
+
 export default function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'mail' | 'dns' | 'accounts' | 'settings'>('overview');
   const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [selectedEmail, setSelectedEmail] = useState<any>(null);
+  const [accounts, setAccounts] = useState<MailAccount[]>([]);
+  const [isFetchingAccounts, setIsFetchingAccounts] = useState(false);
 
   // Mock de emails para a interface profissional
   const [emails, setEmails] = useState([
@@ -36,6 +54,34 @@ export default function App() {
     { id: 2, from: 'Segurança Supabase', subject: 'Chaves de API sincronizadas', snippet: 'A sincronização entre o Stalwart e o Supabase foi concluída com sucesso. Seus metadados estão protegidos.', date: 'Ontem', read: true },
     { id: 3, from: 'Noreply @ GitHub', subject: 'Novo Deploy Detectado', snippet: 'A build do seu dashboard terminou sem erros. Versão 2.4.0-stable ativa.', date: '2 dias atrás', read: true },
   ]);
+
+  const fetchAccounts = useCallback(async () => {
+    if (!supabase) {
+      console.warn('Supabase não configurado. Use os Secrets do AI Studio.');
+      setIsFetchingAccounts(false);
+      return;
+    }
+    
+    setIsFetchingAccounts(true);
+    try {
+      const { data, error } = await supabase
+        .from('mail_accounts')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setAccounts(data || []);
+      
+      // Update stats based on real data
+      if (data) {
+        setStats(prev => prev ? { ...prev, activeAccounts: data.length } : null);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar contas:', err);
+    } finally {
+      setIsFetchingAccounts(false);
+    }
+  }, []);
 
   useEffect(() => {
     fetch('/api/stats')
@@ -45,7 +91,26 @@ export default function App() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, []);
+
+    fetchAccounts();
+  }, [fetchAccounts]);
+
+  const handleDeleteAccount = async (id: string) => {
+    if (!supabase) return;
+    if (!confirm('Tem certeza que deseja excluir esta conta? Isso removerá todos os dados associados.')) return;
+    
+    try {
+      const { error } = await supabase
+        .from('mail_accounts')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      fetchAccounts();
+    } catch (err) {
+      alert('Erro ao excluir conta: ' + (err as Error).message);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-500/30">
@@ -297,48 +362,65 @@ export default function App() {
             {activeTab === 'dns' && (
               <motion.div 
                 key="dns"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="space-y-6"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="max-w-4xl mx-auto space-y-6"
               >
-                <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-sm">
-                  <div className="flex justify-between items-start mb-6">
+                <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm">
+                  <div className="flex justify-between items-start mb-8">
                     <div>
-                      <h2 className="text-xl font-bold text-slate-900 mb-1">Configuração de DNS</h2>
-                      <p className="text-sm text-slate-500">Ajuste estes registros no seu painel da Cloudflare</p>
+                      <h2 className="text-2xl font-black text-slate-900 tracking-tight mb-2">Configuração Express</h2>
+                      <p className="text-slate-500">Copie e cole estes registros no seu painel da Cloudflare</p>
                     </div>
-                    <div className="flex items-center gap-2 px-3 py-1 bg-amber-50 border border-amber-200 text-amber-700 rounded-lg text-xs font-medium">
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      Desligue o Proxy (Nuvem Laranja)
+                    <div className="px-4 py-2 bg-amber-50 border border-amber-200 text-amber-700 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+                       <AlertCircle className="w-3 h-3" /> Proxy Desligado
                     </div>
                   </div>
 
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm border-collapse">
-                      <thead>
-                        <tr className="border-b border-slate-100">
-                          <th className="py-3 px-4 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Tipo</th>
-                          <th className="py-3 px-4 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Nome</th>
-                          <th className="py-3 px-4 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Conteúdo</th>
-                          <th className="py-3 px-4 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Proxy</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-50 text-slate-600">
-                        <DNSRow type="A" host="mail" content="SEU_IP_ZIMAOS" proxy="DNS Only" />
-                        <DNSRow type="MX" host="@" content="mail.amplifamarketing.com.br" priority={10} proxy="DNS Only" />
-                        <DNSRow type="TXT" host="@" content="v=spf1 ip4:SEU_IP_ZIMAOS -all" proxy="N/A" />
-                        <DNSRow type="TXT" host="_dmarc" content="v=DMARC1; p=quarantine;" proxy="N/A" />
-                        <DNSRow type="TXT" host="default._domainkey" content="(Pego no Stalwart Admin)" proxy="N/A" />
-                      </tbody>
-                    </table>
+                  <div className="space-y-3">
+                    <DNSRow type="A" host="mail" content="SEU_IP_ZIMAOS" desc="Aponta para o servidor" />
+                    <DNSRow type="MX" host="@" content="mail.amplifamarketing.com.br" priority={10} desc="Recebimento de emails" />
+                    <div className="h-px bg-slate-100 my-4" />
+                    <DNSRow type="TXT" host="@" content="v=spf1 ip4:SEU_IP_ZIMAOS -all" desc="Segurança SPF" />
+                    <DNSRow type="TXT" host="_dmarc" content="v=DMARC1; p=quarantine;" desc="Segurança DMARC" />
                   </div>
 
-                  <div className="mt-8 p-4 bg-blue-50 rounded-xl border border-blue-100">
-                    <h4 className="text-sm font-bold text-blue-800 mb-2 flex items-center gap-2">
-                      <Settings className="w-4 h-4" /> Importante: Portas do Roteador
-                    </h4>
-                    <p className="text-xs text-blue-700 leading-relaxed">
-                      Sua rede local precisa encaminhar as portas <strong>25, 465, 587, 993 e 143</strong> para o IP interno do seu ZimaOS. Se a sua operadora bloqueia a porta 25 (comum em redes residenciais), você precisará de um Relay ou uma IP Fixo profissional.
+                  <div className="mt-10 p-6 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
+                        <Shield className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-900">DKIM & Chaves</h4>
+                        <p className="text-sm text-slate-500">Pegue a chave 'default._domainkey' no painel Admin do Stalwart</p>
+                      </div>
+                    </div>
+                    <button className="px-5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold hover:bg-slate-50 transition-colors shadow-sm">
+                      Abrir Stalwart Admin
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-blue-600 rounded-3xl p-6 text-white shadow-xl shadow-blue-500/20">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Settings className="w-5 h-5 text-blue-200" />
+                      <h4 className="font-bold">Portas Essenciais</h4>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {['25', '587', '993'].map(port => (
+                        <span key={port} className="px-3 py-1 bg-white/10 rounded-lg text-sm font-mono font-bold">{port}</span>
+                      ))}
+                    </div>
+                    <p className="text-[10px] mt-4 opacity-60 italic">A porta 25 é o "telefone" que outros servidores (Gmail/Outlook) usam para te ligar.</p>
+                  </div>
+                  <div className="bg-slate-900 rounded-3xl p-6 text-white shadow-xl shadow-slate-900/10">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Shield className="w-5 h-5 text-emerald-400" />
+                      <h4 className="font-bold">Acesso Seguro</h4>
+                    </div>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Usamos as versões seguras (TLS) das portas. Seus dados viajam criptografados entre seu celular e seu ZimaOS.
                     </p>
                   </div>
                 </div>
@@ -350,19 +432,112 @@ export default function App() {
                 key="accounts"
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="bg-white border border-slate-200 rounded-2xl p-8 text-center shadow-sm"
+                className="space-y-6"
               >
-                <div className="max-w-md mx-auto py-12">
-                  <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6 border border-slate-100">
-                    <Users className="w-10 h-10 text-slate-400" />
+                <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                        <Users className="w-6 h-6 text-blue-600" />
+                        Gerenciamento de Usuários
+                      </h2>
+                      <p className="text-sm text-slate-500">Contas de email ativas no seu domínio</p>
+                    </div>
+                    <div className="flex gap-2 w-full md:w-auto">
+                      <div className="relative flex-1 md:w-64">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <input 
+                          type="text" 
+                          placeholder="Buscar conta..." 
+                          className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/10 transition-all"
+                        />
+                      </div>
+                      <button 
+                        onClick={() => setIsAccountModalOpen(true)}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all shadow-lg shadow-blue-500/20 active:scale-95"
+                      >
+                        <Plus className="w-4 h-4" /> Criar Conta
+                      </button>
+                    </div>
                   </div>
-                  <h2 className="text-xl font-bold text-slate-900 mb-2">Gerenciamento de Contas</h2>
-                  <p className="text-slate-500 mb-8">
-                    As contas de usuário são sincronizadas diretamente com o Supabase Auth.
-                  </p>
-                  <button className="px-6 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition-transform">
-                    Carregar Usuários do Supabase
-                  </button>
+
+                  {isFetchingAccounts ? (
+                    <div className="py-20 flex flex-col items-center justify-center text-slate-400 gap-4">
+                      <RefreshCw className="w-8 h-8 animate-spin opacity-20" />
+                      <p className="text-sm font-medium">Sincronizando com Supabase...</p>
+                    </div>
+                  ) : !supabase ? (
+                    <div className="py-20 flex flex-col items-center justify-center text-slate-400 text-center px-4">
+                       <AlertCircle className="w-12 h-12 text-amber-500 mb-4 opacity-50" />
+                       <h3 className="font-bold text-slate-900 mb-2">Supabase não Configurado</h3>
+                       <p className="text-xs max-w-sm">Adicione <strong>VITE_SUPABASE_URL</strong> e <strong>VITE_SUPABASE_ANON_KEY</strong> no painel de configurações (ícone de engrenagem) para ativar este gerenciador.</p>
+                    </div>
+                  ) : accounts.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-100 italic">
+                            <th className="py-3 px-4 text-slate-400 font-medium">Usuário</th>
+                            <th className="py-3 px-4 text-slate-400 font-medium">Domínio</th>
+                            <th className="py-3 px-4 text-slate-400 font-medium">Status</th>
+                            <th className="py-3 px-4 text-slate-400 font-medium text-right">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {accounts.map(account => (
+                            <tr key={account.id} className="hover:bg-slate-50/50 transition-colors group">
+                              <td className="py-4 px-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-bold border border-blue-100">
+                                    {account.full_name?.[0] || account.email[0]}
+                                  </div>
+                                  <div>
+                                    <p className="font-bold text-slate-900 leading-none mb-1">{account.full_name}</p>
+                                    <p className="text-xs text-slate-500">{account.email}</p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="py-4 px-4">
+                                <span className="text-xs font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded">{account.domain}</span>
+                              </td>
+                              <td className="py-4 px-4">
+                                <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                  account.is_active ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-slate-100 text-slate-400'
+                                }`}>
+                                  <div className={`w-1.5 h-1.5 rounded-full ${account.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                                  {account.is_active ? 'Ativa' : 'Inativa'}
+                                </span>
+                              </td>
+                              <td className="py-4 px-4 text-right">
+                                <div className="flex justify-end gap-2">
+                                  <button onClick={() => handleDeleteAccount(account.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all">
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                  <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all">
+                                    <Settings className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="py-20 flex flex-col items-center justify-center text-slate-400 text-center">
+                      <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100">
+                        <Users className="w-8 h-8 opacity-20" />
+                      </div>
+                      <h3 className="font-bold text-slate-900 mb-1">Nenhuma conta encontrada</h3>
+                      <p className="text-sm max-w-xs mx-auto">Comece criando sua primeira conta de email profissional para este domínio.</p>
+                      <button 
+                        onClick={() => setIsAccountModalOpen(true)}
+                        className="mt-6 text-blue-600 hover:text-blue-700 font-bold text-sm flex items-center gap-2"
+                      >
+                        <Plus className="w-4 h-4" /> Adicionar Agora
+                      </button>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}
@@ -371,6 +546,11 @@ export default function App() {
       </main>
 
       <ComposeModal isOpen={isComposeOpen} onClose={() => setIsComposeOpen(false)} />
+      <AccountModal 
+        isOpen={isAccountModalOpen} 
+        onClose={() => setIsAccountModalOpen(false)} 
+        onSuccess={fetchAccounts}
+      />
     </div>
 
   );
@@ -432,26 +612,171 @@ function ComposeModal({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
   );
 }
 
-function DNSRow({ type, host, content, proxy, priority }: any) {
+function AccountModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: () => void, onSuccess: () => void }) {
+  const [formData, setFormData] = useState({
+    email: '',
+    full_name: '',
+    domain: 'amplifamarketing.com.br'
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!supabase) {
+      alert('Configure o Supabase primeiro!');
+      return;
+    }
+    
+    setIsSubmitting(true);
+    
+    try {
+      const { error } = await supabase
+        .from('mail_accounts')
+        .insert([{
+          ...formData,
+          is_active: true
+        }]);
+
+      if (error) throw error;
+      
+      onSuccess();
+      onClose();
+      setFormData({ email: '', full_name: '', domain: 'amplifamarketing.com.br' });
+    } catch (err) {
+      alert('Erro ao criar conta: ' + (err as Error).message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
-    <tr className="hover:bg-slate-50/50">
-      <td className="py-4 px-4"><span className="px-2 py-1 bg-slate-100 rounded text-[10px] font-bold text-slate-600">{type}</span></td>
-      <td className="py-4 px-4 font-mono text-xs">{host}</td>
-      <td className="py-4 px-4 font-mono text-xs text-blue-600">
-        {priority && <span className="mr-1 text-slate-300">[{priority}]</span>}
-        {content}
-      </td>
-      <td className="py-4 px-4">
-        {proxy === 'DNS Only' ? (
-          <span className="flex items-center gap-1.5 text-amber-600 font-medium text-xs">
-            <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-            Somente DNS
-          </span>
-        ) : (
-          <span className="text-slate-400 text-xs">{proxy}</span>
-        )}
-      </td>
-    </tr>
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200"
+      >
+        <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+          <div className="flex items-center gap-2">
+            <Users className="w-5 h-5 text-blue-600" />
+            <h3 className="font-bold text-slate-900">Nova Conta de Email</h3>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-lg text-slate-500">×</button>
+        </div>
+        
+        <form onSubmit={handleSubmit}>
+          <div className="p-6 space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-1">Nome Completo</label>
+              <input 
+                required
+                type="text" 
+                value={formData.full_name}
+                onChange={e => setFormData({ ...formData, full_name: e.target.value })}
+                placeholder="Ex: João Silva" 
+                className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all" 
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-1">
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-1">Email (Prefixo)</label>
+                <input 
+                  required
+                  type="text" 
+                  value={formData.email}
+                  onChange={e => setFormData({ ...formData, email: e.target.value })}
+                  placeholder="Ex: contato" 
+                  className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all" 
+                />
+              </div>
+              <div className="col-span-1">
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-1">Domínio</label>
+                <select 
+                  className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20fill%3D%27none%27%20viewBox%3D%270%200%2020%2020%27%3E%3Cpath%20stroke%3D%27%236b7280%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%20stroke-width%3D%271.5%27%20d%3D%27m6%208%204%204%204-4%27%2F%3E%3C%2Fsvg%3E')] bg-[position:right_0.75rem_center] bg-[length:1.25rem_1.25rem] bg-no-repeat"
+                  value={formData.domain}
+                  onChange={e => setFormData({ ...formData, domain: e.target.value })}
+                >
+                  <option value="amplifamarketing.com.br">@amplifamarketing.com.br</option>
+                  <option value="zimaos.local">@zimaos.local</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 flex items-start gap-3">
+              <Shield className="w-5 h-5 text-emerald-600 mt-0.5" />
+              <p className="text-[11px] text-emerald-700 leading-relaxed">
+                Esta conta será criada automaticamente no servidor Stalwart e as credenciais de acesso padrão serão enviadas para o email de recuperação configurado no Supabase.
+              </p>
+            </div>
+          </div>
+          
+          <div className="p-4 bg-slate-50 flex justify-end gap-3 border-t border-slate-100">
+            <button 
+              type="button"
+              onClick={onClose} 
+              className="px-6 py-2 text-slate-500 font-medium hover:text-slate-700 transition-colors"
+            >
+              Cancelar
+            </button>
+            <button 
+              disabled={isSubmitting}
+              className="px-8 py-2 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition-all disabled:opacity-50 flex items-center gap-2"
+            >
+              {isSubmitting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" /> Salvando...
+                </>
+              ) : (
+                'Criar Conta'
+              )}
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </div>
+  );
+}
+
+function DNSRow({ type, host, content, priority, desc }: any) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = () => {
+    navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="flex items-center justify-between p-4 hover:bg-slate-50 rounded-2xl transition-colors border border-transparent hover:border-slate-100 group">
+      <div className="flex items-center gap-4 flex-1">
+        <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center font-black text-xs text-slate-500">
+          {type}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1 flex-1">
+          <div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{host}</p>
+            <p className="text-sm font-mono text-blue-600 font-bold truncate max-w-[200px]">
+              {priority && <span className="text-slate-300 mr-2">[{priority}]</span>}
+              {content}
+            </p>
+          </div>
+          <div className="hidden md:block">
+            <p className="text-xs text-slate-400 mt-4 italic">{desc}</p>
+          </div>
+        </div>
+      </div>
+      <button 
+        onClick={copy}
+        className={`px-4 py-2 rounded-xl text-[10px] font-bold transition-all flex items-center gap-2 ${
+          copied ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+        }`}
+      >
+        {copied ? 'Copiado!' : 'Copiar'}
+      </button>
+    </div>
   );
 }
 

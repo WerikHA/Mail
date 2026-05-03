@@ -18,5 +18,5 @@ EXPOSE 3000
 # Define variáveis de ambiente padrão (podem ser sobrescritas no ZimaOS)
 ENV NODE_ENV=production
 
-# Comando para iniciar o servidor
-CMD ["node", "server.ts"]
+# Comando para iniciar o servidor usando tsx para suportar TypeScript
+CMD ["npx", "tsx", "server.ts"]

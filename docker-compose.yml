@@ -5,12 +5,10 @@ services:
     container_name: zimamail-server
     restart: always
     ports:
-      - "25:25"
-      - "465:465"
-      - "587:587"
-      - "143:143"
-      - "993:993"
-      - "8080:8080"
+      - "25:25"     # Essencial: Receber emails de fora
+      - "587:587"   # Essencial: Enviar emails (SMTP Seguro)
+      - "993:993"   # Essencial: Ler emails (IMAP Seguro/Celular)
+      - "8080:8080" # Painel de Controle Stalwart
     environment:
       - STALWART_DATABASE_URL=postgresql://postgres:${SUPABASE_DB_PASSWORD}@${SUPABASE_DB_HOST}:5432/postgres
     volumes:
