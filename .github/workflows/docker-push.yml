@@ -30,6 +30,6 @@ jobs:
           push: true
           # Altere 'zimamail-dashboard' para o nome que desejar no Docker Hub
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/zimamail-dashboard:0.1
+            werikoliveira/email:0.1
           cache-from: type=gha
           cache-to: type=gha,mode=max
