@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  # O servidor de email Stalwart é o motor principal
+  # Suporta SMTP, IMAP, JMAP e tem interface de administração
+  zimamail-server:
+    image: stalwartlabs/stalwart-mail:latest
+    container_name: zimamail-server
+    restart: always
+    ports:
+      - "25:25"   # SMTP
+      - "465:465" # SMTPS
+      - "587:587" # Submission
+      - "143:143" # IMAP
+      - "993:993" # IMAPS
+      - "8080:8080" # Interface Stalwart Admin
+    environment:
+      # ZimaOS n gosta de .env, entao passamos direto ou o CasaOS pergunta
+      - STALWART_DATABASE_URL=postgresql://postgres:${SUPABASE_DB_PASSWORD}@${SUPABASE_DB_HOST}:5432/postgres
+    volumes:
+      # Raiz do ZimaOS (/DATA) conforme solicitado
+      - /DATA/AppData/ZimaMail/data:/opt/stalwart-mail/data
+      - /DATA/AppData/ZimaMail/config:/opt/stalwart-mail/etc
+
+  # Dashboard Administrativo Customizado (Este Apps)
+  zimamail-dashboard:
+    build: .
+    container_name: zimamail-dashboard
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_SUPABASE_URL=${SUPABASE_URL}
+      - VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - NODE_ENV=production
+    volumes:
+      - /DATA/AppData/ZimaMail/dashboard:/app/data
+
+# Nota para ZimaOS: Certifique-se de que as portas 25 e 587 estão abertas no seu roteador e firewall.

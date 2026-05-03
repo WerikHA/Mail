@@ -1,0 +1,6 @@
+{
+  "name": "ZimaMail Provider",
+  "description": "Um provedor de emails auto-hospedado otimizado para ZimaOS, com integração Supabase e gerenciamento via Docker Compose.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
