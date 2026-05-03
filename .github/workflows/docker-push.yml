@@ -24,11 +24,10 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build e Push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          # Altere 'zimamail-dashboard' para o nome que desejar no Docker Hub
           tags: |
             werikoliveira/email:0.1
           cache-from: type=gha
