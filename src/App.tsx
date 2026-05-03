@@ -41,12 +41,13 @@ interface MailAccount {
 export default function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'mail' | 'dns' | 'accounts' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'mail' | 'dns' | 'accounts' | 'logs' | 'settings'>('overview');
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [selectedEmail, setSelectedEmail] = useState<any>(null);
   const [accounts, setAccounts] = useState<MailAccount[]>([]);
   const [isFetchingAccounts, setIsFetchingAccounts] = useState(false);
+  const [logs, setLogs] = useState<any[]>([]);
 
   const [emails, setEmails] = useState<any[]>([]);
 
@@ -60,24 +61,22 @@ export default function App() {
     }
   }, []);
 
-  const fetchAccounts = useCallback(async () => {
-    if (!supabase) {
-      console.warn('Supabase não configurado. Use os Secrets do AI Studio.');
-      setIsFetchingAccounts(false);
-      return;
+  const fetchLogs = useCallback(async () => {
+    try {
+      const res = await fetch('/api/logs');
+      const data = await res.json();
+      setLogs(data);
+    } catch (err) {
+      console.error('Erro ao buscar logs:', err);
     }
-    
+  }, []);
+
+  const fetchAccounts = useCallback(async () => {
     setIsFetchingAccounts(true);
     try {
-      const { data, error } = await supabase
-        .from('mail_accounts')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
+      const res = await fetch('/api/accounts');
+      const data = await res.json();
       setAccounts(data || []);
-      
-      // Update stats based on real data
       if (data) {
         setStats(prev => prev ? { ...prev, activeAccounts: data.length } : null);
       }
@@ -99,10 +98,12 @@ export default function App() {
 
     fetchAccounts();
     fetchEmails();
+    fetchLogs();
 
     const interval = setInterval(() => {
       fetchEmails();
-    }, 10000); // Polling simples a cada 10s
+      fetchLogs();
+    }, 10000); 
 
     return () => clearInterval(interval);
   }, [fetchAccounts, fetchEmails]);
@@ -154,6 +155,11 @@ export default function App() {
             icon={<Users className="w-6 h-6" />}
           />
           <NavButton 
+            active={activeTab === 'logs'} 
+            onClick={() => setActiveTab('logs')}
+            icon={<Activity className="w-6 h-6" />}
+          />
+          <NavButton 
             active={activeTab === 'settings'} 
             onClick={() => setActiveTab('settings')}
             icon={<Settings className="w-6 h-6" />}
@@ -182,11 +188,11 @@ export default function App() {
           </div>
 
           <div className="flex gap-4">
-            <button className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 rounded-lg border border-slate-200 text-sm font-medium transition-all shadow-sm">
+            <button onClick={() => setActiveTab('logs')} className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 rounded-lg border border-slate-200 text-sm font-medium transition-all shadow-sm">
               Logs do Sistema
             </button>
-            <button className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-all shadow-lg shadow-blue-500/10">
-              Novo Domínio
+            <button onClick={() => setIsAccountModalOpen(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-all shadow-lg shadow-blue-500/10">
+              Nova Conta
             </button>
           </div>
         </header>
@@ -470,13 +476,7 @@ export default function App() {
                   {isFetchingAccounts ? (
                     <div className="py-20 flex flex-col items-center justify-center text-slate-400 gap-4">
                       <RefreshCw className="w-8 h-8 animate-spin opacity-20" />
-                      <p className="text-sm font-medium">Sincronizando com Supabase...</p>
-                    </div>
-                  ) : !supabase ? (
-                    <div className="py-20 flex flex-col items-center justify-center text-slate-400 text-center px-4">
-                       <AlertCircle className="w-12 h-12 text-amber-500 mb-4 opacity-50" />
-                       <h3 className="font-bold text-slate-900 mb-2">Supabase não Configurado</h3>
-                       <p className="text-xs max-w-sm">Adicione <strong>VITE_SUPABASE_URL</strong> e <strong>VITE_SUPABASE_ANON_KEY</strong> no painel de configurações (ícone de engrenagem) para ativar este gerenciador.</p>
+                      <p className="text-sm font-medium">Sincronizando contas locais...</p>
                     </div>
                   ) : accounts.length > 0 ? (
                     <div className="overflow-x-auto">
@@ -484,7 +484,6 @@ export default function App() {
                         <thead>
                           <tr className="border-b border-slate-100 italic">
                             <th className="py-3 px-4 text-slate-400 font-medium">Usuário</th>
-                            <th className="py-3 px-4 text-slate-400 font-medium">Domínio</th>
                             <th className="py-3 px-4 text-slate-400 font-medium">Status</th>
                             <th className="py-3 px-4 text-slate-400 font-medium text-right">Ações</th>
                           </tr>
@@ -495,32 +494,24 @@ export default function App() {
                               <td className="py-4 px-4">
                                 <div className="flex items-center gap-3">
                                   <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-bold border border-blue-100">
-                                    {account.full_name?.[0] || account.email[0]}
+                                    {account.name?.[0] || account.email[0]}
                                   </div>
                                   <div>
-                                    <p className="font-bold text-slate-900 leading-none mb-1">{account.full_name}</p>
+                                    <p className="font-bold text-slate-900 leading-none mb-1">{account.name}</p>
                                     <p className="text-xs text-slate-500">{account.email}</p>
                                   </div>
                                 </div>
                               </td>
                               <td className="py-4 px-4">
-                                <span className="text-xs font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded">{account.domain}</span>
-                              </td>
-                              <td className="py-4 px-4">
-                                <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                                  account.is_active ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-slate-100 text-slate-400'
-                                }`}>
-                                  <div className={`w-1.5 h-1.5 rounded-full ${account.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                                  {account.is_active ? 'Ativa' : 'Inativa'}
+                                <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-600 border border-emerald-100">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                  Ativa
                                 </span>
                               </td>
                               <td className="py-4 px-4 text-right">
                                 <div className="flex justify-end gap-2">
-                                  <button onClick={() => handleDeleteAccount(account.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all">
+                                  <button className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all">
                                     <Trash2 className="w-4 h-4" />
-                                  </button>
-                                  <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all">
-                                    <Settings className="w-4 h-4" />
                                   </button>
                                 </div>
                               </td>
@@ -535,7 +526,7 @@ export default function App() {
                         <Users className="w-8 h-8 opacity-20" />
                       </div>
                       <h3 className="font-bold text-slate-900 mb-1">Nenhuma conta encontrada</h3>
-                      <p className="text-sm max-w-xs mx-auto">Comece criando sua primeira conta de email profissional para este domínio.</p>
+                      <p className="text-sm max-w-xs mx-auto">Comece criando sua primeira conta de email profissional.</p>
                       <button 
                         onClick={() => setIsAccountModalOpen(true)}
                         className="mt-6 text-blue-600 hover:text-blue-700 font-bold text-sm flex items-center gap-2"
@@ -544,6 +535,108 @@ export default function App() {
                       </button>
                     </div>
                   )}
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'logs' && (
+              <motion.div 
+                key="logs"
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="space-y-4"
+              >
+                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                  <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                    <h3 className="font-bold flex items-center gap-2 text-slate-900">
+                      <Activity className="w-5 h-5 text-blue-600" /> Atividade em Tempo Real
+                    </h3>
+                    <button onClick={fetchLogs} className="p-2 hover:bg-slate-100 rounded-lg"><RefreshCw className="w-4 h-4 text-slate-400" /></button>
+                  </div>
+                  <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
+                    {logs.map(log => (
+                      <div key={log.id} className="p-4 flex items-start gap-4 hover:bg-slate-50 transition-colors">
+                        <div className={`mt-1 h-2 w-2 rounded-full shrink-0 ${
+                          log.type === 'error' ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : 
+                          log.type === 'smtp' ? 'bg-blue-500' : 'bg-slate-400'
+                        }`} />
+                        <div className="flex-1">
+                          <p className="text-sm text-slate-700 font-medium">{log.message}</p>
+                          <p className="text-[10px] text-slate-400 font-mono mt-1">{new Date(log.timestamp).toLocaleString()}</p>
+                        </div>
+                        <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${
+                           log.type === 'error' ? 'bg-red-50 text-red-600' : 
+                           log.type === 'smtp' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          {log.type}
+                        </span>
+                      </div>
+                    ))}
+                    {logs.length === 0 && (
+                      <div className="p-20 text-center text-slate-400">
+                        <Activity className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                        <p>Nenhum log registrado ainda.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'settings' && (
+              <motion.div 
+                key="settings"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="max-w-4xl mx-auto space-y-6"
+              >
+                <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm">
+                  <h2 className="text-2xl font-black text-slate-900 tracking-tight mb-8">Configurações do Provedor</h2>
+                  
+                  <div className="space-y-8">
+                    <section>
+                      <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Credenciais de Acesso (IMAP/SMTP)</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                          <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Host de Entrada (IMAP)</p>
+                          <p className="text-sm font-mono font-bold text-slate-700">mail.{window.location.hostname}</p>
+                          <p className="text-[10px] text-slate-400 mt-2">Porta: 993 (SSL/TLS)</p>
+                        </div>
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                          <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Host de Saída (SMTP)</p>
+                          <p className="text-sm font-mono font-bold text-slate-700">mail.{window.location.hostname}</p>
+                          <p className="text-[10px] text-slate-400 mt-2">Porta: 465 (SSL/TLS)</p>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section>
+                      <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Armazenamento Nativo</h4>
+                      <div className="p-6 border border-slate-100 rounded-2xl flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <div className="p-3 bg-amber-50 rounded-xl">
+                            <HardDrive className="w-6 h-6 text-amber-600" />
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-900">Modo Local Ativado</p>
+                            <p className="text-xs text-slate-500">Emails e contas salvos em /app/data/*.json</p>
+                          </div>
+                        </div>
+                        <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-black rounded-lg border border-emerald-100 uppercase tracking-widest">Seguro</span>
+                      </div>
+                    </section>
+
+                    <section>
+                      <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Desenvolvedor</h4>
+                      <p className="text-sm text-slate-600 leading-relaxed mb-4">
+                        Este provedor foi construído sob medida para rodar nativamente no ZimaOS sem dependências de terceiros como Stalwart. 
+                        Toda a lógica de SMTP e armazenamento é proprietária.
+                      </p>
+                      <div className="bg-slate-900 rounded-2xl p-4 text-xs font-mono text-emerald-400">
+                        ZimaMail Engine v3.1.0-stable
+                      </div>
+                    </section>
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -681,26 +774,26 @@ function AccountModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!supabase) {
-      alert('Configure o Supabase primeiro!');
-      return;
-    }
-    
     setIsSubmitting(true);
     
     try {
-      const { error } = await supabase
-        .from('mail_accounts')
-        .insert([{
-          ...formData,
-          is_active: true
-        }]);
-
-      if (error) throw error;
-      
-      onSuccess();
-      onClose();
-      setFormData({ email: '', full_name: '', domain: 'amplifamarketing.com.br' });
+      const res = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: `${formData.email}@${formData.domain}`,
+          name: formData.full_name,
+          password: 'zima-temp-pass' // Em produção usar um gerador de senha
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        onSuccess();
+        onClose();
+        setFormData({ email: '', full_name: '', domain: 'amplifamarketing.com.br' });
+      } else {
+        alert('Erro: ' + data.message);
+      }
     } catch (err) {
       alert('Erro ao criar conta: ' + (err as Error).message);
     } finally {
