@@ -14,6 +14,9 @@ const DATA_DIR = path.join(process.cwd(), "data");
 const EMAILS_FILE = path.join(DATA_DIR, "emails.json");
 const ACCOUNTS_FILE = path.join(DATA_DIR, "accounts.json");
 const LOGS_FILE = path.join(DATA_DIR, "logs.json");
+const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
+const DOMAINS_FILE = path.join(DATA_DIR, "domains.json");
+const RELAYS_FILE = path.join(DATA_DIR, "relays.json");
 
 async function initStorage() {
   try {
@@ -21,7 +24,17 @@ async function initStorage() {
     const files = [
       { path: EMAILS_FILE, default: [] },
       { path: ACCOUNTS_FILE, default: [] },
-      { path: LOGS_FILE, default: [] }
+      { path: LOGS_FILE, default: [] },
+      { path: SETTINGS_FILE, default: { 
+        smtp_host: "", 
+        smtp_port: 587, 
+        smtp_user: "", 
+        smtp_pass: "", 
+        domain: "amplifamarketing.com.br",
+        delivery_mode: "internal" 
+      } },
+      { path: DOMAINS_FILE, default: ["amplifamarketing.com.br"] },
+      { path: RELAYS_FILE, default: [] }
     ];
     for (const file of files) {
       try {
@@ -163,6 +176,94 @@ async function startServer() {
     }
   });
 
+  app.get("/api/settings", async (req, res) => {
+    try {
+      const content = await fs.readFile(SETTINGS_FILE, "utf-8");
+      res.json(JSON.parse(content));
+    } catch (e) { res.json({}); }
+  });
+
+  app.post("/api/settings", async (req, res) => {
+    try {
+      await fs.writeFile(SETTINGS_FILE, JSON.stringify(req.body, null, 2));
+      await addLog("Configurações atualizadas", "info");
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.get("/api/domains", async (req, res) => {
+    try {
+      const content = await fs.readFile(DOMAINS_FILE, "utf-8");
+      res.json(JSON.parse(content));
+    } catch (e) { res.json([]); }
+  });
+
+  app.get("/api/relays", async (req, res) => {
+    try {
+      const content = await fs.readFile(RELAYS_FILE, "utf-8");
+      res.json(JSON.parse(content));
+    } catch (e) { res.json([]); }
+  });
+
+  app.post("/api/relays", async (req, res) => {
+    try {
+      const relay = { id: Date.now().toString(), ...req.body };
+      const content = await fs.readFile(RELAYS_FILE, "utf-8");
+      const relays = JSON.parse(content);
+      relays.push(relay);
+      await fs.writeFile(RELAYS_FILE, JSON.stringify(relays, null, 2));
+      await addLog(`Novo Relay configurado: ${relay.name}`, "info");
+      res.json({ success: true, relays });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.delete("/api/relays/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const content = await fs.readFile(RELAYS_FILE, "utf-8");
+      let relays = JSON.parse(content);
+      relays = relays.filter((r: any) => r.id !== id);
+      await fs.writeFile(RELAYS_FILE, JSON.stringify(relays, null, 2));
+      res.json({ success: true, relays });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post("/api/domains", async (req, res) => {
+    try {
+      const { domain } = req.body;
+      const content = await fs.readFile(DOMAINS_FILE, "utf-8");
+      const domains = JSON.parse(content);
+      if (!domains.includes(domain)) {
+        domains.push(domain);
+        await fs.writeFile(DOMAINS_FILE, JSON.stringify(domains, null, 2));
+        await addLog(`Novo domínio gerenciado: ${domain}`, "info");
+      }
+      res.json({ success: true, domains });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.delete("/api/domains/:domain", async (req, res) => {
+    try {
+      const { domain } = req.params;
+      const content = await fs.readFile(DOMAINS_FILE, "utf-8");
+      let domains = JSON.parse(content);
+      domains = domains.filter((d: string) => d !== domain);
+      await fs.writeFile(DOMAINS_FILE, JSON.stringify(domains, null, 2));
+      await addLog(`Domínio removido: ${domain}`, "info");
+      res.json({ success: true, domains });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   app.get("/api/mail/inbox", async (req, res) => {
     try {
       const content = await fs.readFile(EMAILS_FILE, "utf-8");
@@ -176,22 +277,56 @@ async function startServer() {
   app.post("/api/mail/send", async (req, res) => {
     const { to, subject, body } = req.body;
     try {
-      const transporter = nodemailer.createTransport({
-        host: "localhost",
-        port: SMTP_PORT,
-        secure: false,
-        tls: {
-          rejectUnauthorized: false
+      const settings = JSON.parse(await fs.readFile(SETTINGS_FILE, "utf-8"));
+      const relays = JSON.parse(await fs.readFile(RELAYS_FILE, "utf-8"));
+      
+      let transporter;
+      let usedRelay = "Motor Interno (ZimaSend)";
+
+      if (settings.delivery_mode === "external") {
+        // Modo Relay Externo
+        const relayToUse = relays.length > 0 ? relays[0] : (settings.smtp_host ? {
+          host: settings.smtp_host,
+          port: settings.smtp_port,
+          user: settings.smtp_user,
+          pass: settings.smtp_pass
+        } : null);
+
+        if (relayToUse) {
+          transporter = nodemailer.createTransport({
+            host: relayToUse.host,
+            port: parseInt(relayToUse.port),
+            secure: relayToUse.port == 465,
+            auth: { user: relayToUse.user, pass: relayToUse.pass }
+          });
+          usedRelay = `Relay: ${relayToUse.host}`;
         }
-      });
+      }
+
+      if (!transporter) {
+        // Modo Entrega Direta (Interno) 
+        // Em produção, isso faria MX Lookup. Aqui simulamos via fallback local
+        // ou usamos o próprio serviço de SMTP se configurado.
+        await addLog(`Iniciando entrega direta (ZimaSend) para ${to}`, "info");
+        transporter = nodemailer.createTransport({
+          host: "localhost",
+          port: SMTP_PORT,
+          secure: false,
+          tls: { rejectUnauthorized: false }
+        });
+      }
+
+      await addLog(`Processando outbound via ${usedRelay}`, "smtp");
+      
       await transporter.sendMail({
-        from: '"ZimaMail" <system@zimamail.local>',
+        from: `"ZimaMail" <system@${settings.domain}>`,
         to, subject, html: body
       });
-      await addLog(`Email enviado para ${to}`, "smtp");
-      res.json({ success: true });
+      
+      await addLog(`Email entregue com sucesso para ${to}`, "smtp");
+      res.json({ success: true, mode: settings.delivery_mode });
     } catch (error: any) {
-      await addLog(`Falha no envio para ${to}: ${error.message}`, "error");
+      await addLog(`FALHA NA ENTREGA para ${to}: ${error.message}`, "error");
       res.status(500).json({ success: false, message: error.message });
     }
   });
