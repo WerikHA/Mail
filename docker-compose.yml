@@ -1,7 +1,7 @@
 services:
   # O motor de email Stalwart
   zimamail-server:
-    image: stalwartlabs/stalwart-mail:latest
+    image: stalwartlabs/mail-server:latest
     container_name: zimamail-server
     restart: always
     ports:
@@ -12,20 +12,19 @@ services:
     environment:
       - STALWART_DATABASE_URL=postgresql://postgres:${SUPABASE_DB_PASSWORD}@${SUPABASE_DB_HOST}:5432/postgres
     volumes:
-      - /DATA/AppData/ZimaMail/data:/opt/stalwart-mail/data
-      - /DATA/AppData/ZimaMail/config:/opt/stalwart-mail/etc
+      - /DATA/AppData/zimamail/server/data:/opt/stalwart-mail/data
+      - /DATA/AppData/zimamail/server/config:/opt/stalwart-mail/etc
 
   # Seu Dashboard Profissional
   zimamail-dashboard:
-    image: werikoliveira/email:0.1
+    image: werikoliveira/email:latest
     container_name: zimamail-dashboard
     restart: always
     ports:
-      - "3000:3000"
+      - "3080:3000"
     environment:
       - VITE_SUPABASE_URL=${SUPABASE_URL}
       - VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
       - NODE_ENV=production
     volumes:
-      - /DATA/AppData/ZimaMail/dashboard:/app/data
+      - /DATA/AppData/zimamail/dashboard/data:/app/data
