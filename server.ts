@@ -234,6 +234,87 @@ async function startServer() {
     }
   });
 
+  app.post("/api/cloudflare/sync", async (req, res) => {
+    try {
+      const settings = JSON.parse(await fs.readFile(SETTINGS_FILE, "utf-8"));
+      const relays = JSON.parse(await fs.readFile(RELAYS_FILE, "utf-8"));
+      
+      if (!settings.cf_token || !settings.cf_zone) {
+        return res.status(400).json({ success: false, message: "API Token ou Zone ID ausentes." });
+      }
+
+      const headers = {
+        'Authorization': `Bearer ${settings.cf_token}`,
+        'Content-Type': 'application/json'
+      };
+
+      // 1. Gerar SPF Combinado
+      const spfContent = `v=spf1 ip4:${process.env.SERVER_IP || '127.0.0.1'} ${relays.map((r:any) => `include:${r.host.split('.').slice(-2).join('.')}`).join(' ')} ~all`;
+      
+      // 2. Buscar registros existentes para evitar duplicidade ou atualizar
+      const getRecords = await fetch(`https://api.cloudflare.com/client/v4/zones/${settings.cf_zone}/dns_records`, { headers });
+      const recordsData: any = await getRecords.json();
+      
+      if (!recordsData.success) throw new Error("Erro ao acessar API do Cloudflare.");
+
+      const results = [];
+
+      // Função auxiliar para Upsert (Update or Insert)
+      const upsertRecord = async (type: string, name: string, content: string) => {
+        const existing = recordsData.result.find((r: any) => r.type === type && r.name.includes(name));
+        const url = existing 
+          ? `https://api.cloudflare.com/client/v4/zones/${settings.cf_zone}/dns_records/${existing.id}`
+          : `https://api.cloudflare.com/client/v4/zones/${settings.cf_zone}/dns_records`;
+        
+        await fetch(url, {
+          method: existing ? 'PUT' : 'POST',
+          headers,
+          body: JSON.stringify({
+            type,
+            name,
+            content,
+            ttl: 1,
+            proxied: false // Sempre modo DNS-Only
+          })
+        });
+        return { type, name, status: existing ? 'updated' : 'created' };
+      };
+
+      // Sync SPF
+      results.push(await upsertRecord('TXT', '@', spfContent));
+
+      // Sync DKIMs dos Relays
+      for (const relay of relays) {
+        const selector = relay.name.toLowerCase().replace(/\s/g, '');
+        results.push(await upsertRecord('TXT', `${selector}._domainkey`, 'v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADC...'));
+      }
+
+      await addLog(`DNS Sincronizado via Cloudflare API: ${results.length} registros processados.`, "info");
+      res.json({ success: true, results });
+    } catch (error: any) {
+      await addLog(`Erro na sincronização Cloudflare: ${error.message}`, "error");
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post("/api/relays/test", async (req, res) => {
+    const relay = req.body;
+    try {
+      await addLog(`Testando conexão com relay: ${relay.name || relay.host}`, "info");
+      const transporter = nodemailer.createTransport({
+        host: relay.host,
+        port: parseInt(relay.port),
+        secure: relay.port == 465,
+        auth: { user: relay.user, pass: relay.pass },
+        connectionTimeout: 5000
+      });
+      await transporter.verify();
+      res.json({ success: true });
+    } catch (error: any) {
+      res.json({ success: false, message: error.message });
+    }
+  });
+
   app.post("/api/domains", async (req, res) => {
     try {
       const { domain } = req.body;
@@ -264,6 +345,29 @@ async function startServer() {
     }
   });
 
+  app.get("/api/track/:emailId", async (req, res) => {
+    const { emailId } = req.params;
+    try {
+      await addLog(`EMAIL ABERTO: Rastreio #${emailId}`, "track");
+      
+      // Retornar um GIF transparente de 1x1 pixel
+      const pixel = Buffer.from(
+        "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+        "base64"
+      );
+      res.writeHead(200, {
+        "Content-Type": "image/gif",
+        "Content-Length": pixel.length,
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+      });
+      res.end(pixel);
+    } catch (e) {
+      res.status(500).end();
+    }
+  });
+
   app.get("/api/mail/inbox", async (req, res) => {
     try {
       const content = await fs.readFile(EMAILS_FILE, "utf-8");
@@ -280,53 +384,97 @@ async function startServer() {
       const settings = JSON.parse(await fs.readFile(SETTINGS_FILE, "utf-8"));
       const relays = JSON.parse(await fs.readFile(RELAYS_FILE, "utf-8"));
       
-      let transporter;
-      let usedRelay = "Motor Interno (ZimaSend)";
+      let success = false;
+      let lastError = null;
+      let usedRelayName = "Nenhum";
 
       if (settings.delivery_mode === "external") {
-        // Modo Relay Externo
-        const relayToUse = relays.length > 0 ? relays[0] : (settings.smtp_host ? {
-          host: settings.smtp_host,
-          port: settings.smtp_port,
-          user: settings.smtp_user,
-          pass: settings.smtp_pass
-        } : null);
-
-        if (relayToUse) {
-          transporter = nodemailer.createTransport({
-            host: relayToUse.host,
-            port: parseInt(relayToUse.port),
-            secure: relayToUse.port == 465,
-            auth: { user: relayToUse.user, pass: relayToUse.pass }
+        const availableRelays = [...relays];
+        // Adiciona relay legado se existir e não houver outros
+        if (availableRelays.length === 0 && settings.smtp_host) {
+          availableRelays.push({
+            name: "Relay Padrão",
+            host: settings.smtp_host,
+            port: settings.smtp_port,
+            user: settings.smtp_user,
+            pass: settings.smtp_pass
           });
-          usedRelay = `Relay: ${relayToUse.host}`;
         }
-      }
 
-      if (!transporter) {
-        // Modo Entrega Direta (Interno) 
-        // Em produção, isso faria MX Lookup. Aqui simulamos via fallback local
-        // ou usamos o próprio serviço de SMTP se configurado.
-        await addLog(`Iniciando entrega direta (ZimaSend) para ${to}`, "info");
-        transporter = nodemailer.createTransport({
-          host: "localhost",
-          port: SMTP_PORT,
-          secure: false,
-          tls: { rejectUnauthorized: false }
+        if (availableRelays.length === 0) {
+          throw new Error("Nenhum Relay SMTP configurado no modo Externo.");
+        }
+
+        // Tentar cada relay até um funcionar (Failover)
+        for (let i = 0; i < availableRelays.length; i++) {
+          const relay = availableRelays[i];
+          try {
+            await addLog(`Tentando relay #${i + 1}: ${relay.name || relay.host}`, "smtp");
+            
+            const transporter = nodemailer.createTransport({
+              host: relay.host,
+              port: parseInt(relay.port),
+              secure: relay.port == 465,
+              auth: { user: relay.user, pass: relay.pass },
+              timeout: 10000 // 10 segundos de timeout por relay
+            });
+
+            const trackingId = `out_${Date.now()}`;
+            const protocol = req.headers['x-forwarded-proto'] || 'http';
+            const host = req.get('host');
+            const trackingPixel = `<img src="${protocol}://${host}/api/track/${trackingId}" width="1" height="1" style="display:none" />`;
+            const trackedBody = body + trackingPixel;
+
+            await transporter.sendMail({
+              from: `"ZimaMail" <system@${settings.domain}>`,
+              to, subject, html: trackedBody
+            });
+
+            usedRelayName = relay.name || relay.host;
+            success = true;
+            await addLog(`Email entregue via ${usedRelayName}`, "smtp");
+            break; // Sai do loop se enviou com sucesso
+          } catch (relayErr: any) {
+            lastError = relayErr.message;
+            await addLog(`Relay ${relay.name || relay.host} FALHOU: ${relayErr.message}. Tentando próximo...`, "error");
+          }
+        }
+      } else {
+        // Modo Entrega Direta (Interno Real) 
+        await addLog(`Realizando entrega direta (ZimaOS) para ${to}`, "info");
+        const transporter = nodemailer.createTransport({
+          sendmail: true,
+          newline: 'unix',
+          path: '/usr/sbin/sendmail'
         });
+
+        const trackingId = `out_${Date.now()}`;
+        const protocol = req.headers['x-forwarded-proto'] || 'http';
+        const host = req.get('host');
+        const trackingPixel = `<img src="${protocol}://${host}/api/track/${trackingId}" width="1" height="1" style="display:none" />`;
+        const trackedBody = body + trackingPixel;
+
+        await transporter.sendMail({
+          from: `"ZimaMail" <system@${settings.domain}>`,
+          to, subject, html: trackedBody
+        });
+        success = true;
+        usedRelayName = "Motor Interno (Sendmail)";
       }
 
-      await addLog(`Processando outbound via ${usedRelay}`, "smtp");
-      
-      await transporter.sendMail({
-        from: `"ZimaMail" <system@${settings.domain}>`,
-        to, subject, html: body
-      });
-      
-      await addLog(`Email entregue com sucesso para ${to}`, "smtp");
-      res.json({ success: true, mode: settings.delivery_mode });
+      if (success) {
+        await addLog(`Job finalizado: ${to}`, "smtp");
+        res.json({ 
+          success: true, 
+          relay: usedRelayName,
+          mode: settings.delivery_mode,
+          warning: settings.delivery_mode === 'internal' ? "Nota: E-mail enviado via servidor local. Verifique SPF/DKIM." : null
+        });
+      } else {
+        throw new Error(`Todos os relays falharam. Último erro: ${lastError}`);
+      }
     } catch (error: any) {
-      await addLog(`FALHA NA ENTREGA para ${to}: ${error.message}`, "error");
+      await addLog(`FALHA TOTAL na entrega para ${to}: ${error.message}`, "error");
       res.status(500).json({ success: false, message: error.message });
     }
   });

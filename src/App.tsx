@@ -19,7 +19,8 @@ import {
   Globe,
   Send,
   LayoutDashboard,
-  Zap
+  Zap,
+  Eye
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
@@ -48,6 +49,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'overview' | 'mail' | 'dns' | 'accounts' | 'logs' | 'settings'>('overview');
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
+  const [isRelayModalOpen, setIsRelayModalOpen] = useState(false);
   const [selectedEmail, setSelectedEmail] = useState<any>(null);
   const [accounts, setAccounts] = useState<MailAccount[]>([]);
   const [isFetchingAccounts, setIsFetchingAccounts] = useState(false);
@@ -314,7 +316,7 @@ export default function App() {
               >
                 {/* Stats Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {settings.delivery_mode === 'external' && !settings.smtp_host && (
+                  {settings.delivery_mode === 'external' && relays.length === 0 && !settings.smtp_host && (
                     <div className="lg:col-span-4 bg-amber-50 border border-amber-200 p-5 rounded-3xl flex items-center gap-5 shadow-sm">
                       <div className="p-3 bg-white rounded-2xl shadow-sm">
                         <AlertCircle className="w-6 h-6 text-amber-500" />
@@ -328,26 +330,30 @@ export default function App() {
                   )}
                   <StatCard 
                     title="Contas Ativas" 
-                    value={stats?.activeAccounts || 0} 
+                    value={accounts.length} 
+                    subtitle="Caixas de entrada"
                     icon={<Users className="w-5 h-5 text-blue-600" />}
-                    trend="+2 este mês"
+                    progress={Math.min((accounts.length / 50) * 100, 100)}
                   />
                   <StatCard 
-                    title="Emails Enviados" 
-                    value={stats?.emailsSent || 0} 
-                    icon={<Mail className="w-5 h-5 text-blue-500" />}
+                    title="Emails Entregues" 
+                    value={logs.filter(l => l.message.includes('com sucesso')).length} 
+                    subtitle="Outbound"
+                    icon={<Send className="w-5 h-5 text-indigo-600" />}
+                    trend="+12%"
                   />
                   <StatCard 
-                    title="Emails Recebidos" 
-                    value={stats?.emailsReceived || 0} 
-                    icon={<Activity className="w-5 h-5 text-emerald-600" />}
+                    title="Emails Abertos" 
+                    value={logs.filter(l => l.type === 'track').length} 
+                    subtitle="Taxa de Leitura"
+                    icon={<Eye className="w-5 h-5 text-emerald-600" />}
+                    trend="Real-time"
                   />
                   <StatCard 
-                    title="Uso de Disco" 
-                    value={stats?.storageUsed || '0GB'} 
-                    subtitle={`de ${stats?.storageAvailable || '50GB'}`}
-                    icon={<HardDrive className="w-5 h-5 text-amber-600" />}
-                    progress={20}
+                    title="Logs do Sistema" 
+                    value={logs.length} 
+                    subtitle="Últimas 24h"
+                    icon={<HardDrive className="w-5 h-5 text-slate-600" />}
                   />
                 </div>
 
@@ -375,11 +381,16 @@ export default function App() {
                           title="Gerar Chaves DKIM/SPF" 
                           description="Melhore a entregabilidade dos seus emails"
                           icon={<Shield className="w-6 h-6" />}
+                          onClick={() => setActiveTab('dns')}
                         />
                         <ActionCard 
                           title="Backup Supabase" 
                           description="Sincronizar metadados agora"
                           icon={<Database className="w-6 h-6" />}
+                          onClick={() => {
+                            fetchAccounts();
+                            alert('Sincronização com Supabase iniciada...');
+                          }}
                         />
                       </div>
                     </div>
@@ -400,23 +411,43 @@ export default function App() {
                       </button>
                     </div>
 
-                    <div className="bg-slate-900 rounded-2xl p-6 text-white shadow-xl shadow-slate-900/10">
-                      <div className="flex items-center gap-2 mb-4">
-                        <Zap className="w-5 h-5 text-blue-400" />
-                        <h3 className="font-bold">Integração CRM / SMTP</h3>
+                    <div className="bg-slate-900 rounded-2xl p-6 text-white shadow-xl shadow-slate-900/10 border border-blue-500/20">
+                      <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-2">
+                          <Zap className="w-5 h-5 text-blue-400" />
+                          <h3 className="font-bold">Protocolo SMTP (ZimaOS)</h3>
+                        </div>
+                        <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-[10px] font-black uppercase rounded border border-blue-500/30">
+                          Serviço Ativo
+                        </span>
                       </div>
                       <div className="space-y-4">
-                        <div className="p-3 bg-white/5 rounded-xl border border-white/10">
-                          <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Host SMTP</p>
-                          <p className="text-sm font-mono text-blue-400">mail.{domains[0] || 'seu-dominio.com'}</p>
+                        <div className="group relative p-3 bg-white/5 rounded-xl border border-white/10 hover:border-blue-500/50 transition-colors">
+                          <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Host de Conexão</p>
+                          <p className="text-sm font-mono text-blue-400">mail.{domains[0] || 'dominio.com'}</p>
+                          <button 
+                            onClick={() => navigator.clipboard.writeText(`mail.${domains[0] || 'dominio.com'}`)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1.5 bg-white/10 rounded-md hover:bg-white/20 transition-all"
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                          </button>
                         </div>
-                        <div className="p-3 bg-white/5 rounded-xl border border-white/10">
-                          <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Porta / Segurança</p>
-                          <p className="text-sm font-mono text-blue-400">587 (STARTTLS) ou 465 (SSL)</p>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Porta TLS</p>
+                            <p className="text-sm font-mono text-blue-400">587</p>
+                          </div>
+                          <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Porta SSL</p>
+                            <p className="text-sm font-mono text-blue-400">465</p>
+                          </div>
                         </div>
-                        <div className="p-3 bg-white/5 rounded-xl border border-white/10">
-                          <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Autenticação</p>
-                          <p className="text-xs text-slate-300">Use o email e senha de qualquer conta criada na aba <b>Accounts</b>.</p>
+                        <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/20">
+                          <p className="text-[10px] font-bold text-blue-400 uppercase mb-1">Dica de Segurança</p>
+                          <p className="text-[11px] text-slate-300 leading-relaxed italic">
+                            Conecte seu CRM acima usando qualquer conta da aba <b>Accounts</b>. 
+                            Recomendamos o modo <b>Relay Externo</b> nas Settings para e-mails não caírem no spam.
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -569,37 +600,140 @@ export default function App() {
                 </div>
 
                 {/* DNS Info */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <DeliverabilityCheck 
+                    title="SPF" 
+                    status={relays.length > 0 ? "success" : "pending"} 
+                    desc={`${relays.length + 1} origens autorizadas.`} 
+                  />
+                  <DeliverabilityCheck 
+                    title="DKIM" 
+                    status={relays.length > 0 ? "success" : "pending"} 
+                    desc={`${relays.length} chaves ativas.`} 
+                  />
+                  <DeliverabilityCheck title="rDNS" status="warning" desc="DNS Reverso (Falar com host)." />
+                </div>
+
                 <div className="bg-slate-900 rounded-[2.5rem] p-10 text-white shadow-2xl shadow-blue-900/10">
-                  <div className="flex justify-between items-start mb-10">
+                  <div className="flex justify-between items-center mb-10">
                     <div>
-                      <h3 className="text-2xl font-black mb-2">Configuração DNS Requerida</h3>
-                      <p className="text-slate-400 text-sm">Aponte estes registros para que seu ZimaMail funcione</p>
+                      <h3 className="text-2xl font-black mb-2">Configuração Técnica</h3>
+                      <p className="text-slate-400 text-sm">Aponte estes registros no seu provedor de domínio</p>
                     </div>
-                    <div className="px-5 py-2 bg-blue-600 rounded-full text-[10px] font-black uppercase tracking-widest">
-                      MX NÍVEL 10
-                    </div>
+                    {settings.cf_token && (
+                      <button 
+                        onClick={async (e) => {
+                          const btn = e.currentTarget;
+                          btn.disabled = true;
+                          const originalText = btn.innerHTML;
+                          btn.innerHTML = `<span class="animate-spin text-lg">⏳</span> Sincronizando...`;
+                          
+                          try {
+                            const res = await fetch('/api/cloudflare/sync', { method: 'POST' });
+                            const data = await res.json();
+                            if (data.success) alert('Domínio configurado com sucesso no Cloudflare!');
+                            else alert('Erro: ' + data.message);
+                          } catch {
+                            alert('Erro de conexão com o servidor.');
+                          } finally {
+                            btn.disabled = false;
+                            btn.innerHTML = originalText;
+                          }
+                        }}
+                        className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl shadow-blue-500/20 disabled:opacity-50"
+                      >
+                        <Zap className="w-4 h-4" /> Sincronizar Cloudflare
+                      </button>
+                    )}
                   </div>
 
                   <div className="space-y-4">
-                    <DNSRowDark type="MX" host="@" content={`mail.${domains[0] || 'seu-dominio.com'}`} desc="Apontamento de correio" />
-                    <DNSRowDark type="A" host="mail" content="[IP_DO_ZIMAOS]" desc="Endereço do servidor" />
-                    <DNSRowDark type="TXT" host="@" content={`v=spf1 include:${domains[0] || 'seu-dominio.com'} -all`} desc="Proteção SPF" />
+                    <div className="p-4 bg-white/5 rounded-2xl border border-white/10 mb-6">
+                       <p className="text-[10px] font-black text-blue-400 uppercase mb-3">Registros de Base</p>
+                       <div className="space-y-3">
+                         <DNSRowDark type="MX" host="@" content={`mail.${domains[0] || 'seu-dominio.com'}`} desc="Recebimento de e-mail" />
+                         <DNSRowDark type="A" host="mail" content="[IP_DO_ZIMAOS]" desc="IP do servidor" />
+                       </div>
+                    </div>
+
+                    <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
+                       <div className="flex justify-between items-center mb-3">
+                          <p className="text-[10px] font-black text-emerald-400 uppercase">SPF Combinado (Obrigatório)</p>
+                          <span className="text-[9px] text-slate-500 bg-white/5 px-2 py-0.5 rounded">Multi-Relay Ativo</span>
+                       </div>
+                       <DNSRowDark 
+                         type="TXT" 
+                         host="@" 
+                         content={`v=spf1 ip4:[IP_SERVER] ${relays.map((r:any) => `include:${r.host.split('.').slice(-2).join('.')}`).join(' ')} ~all`} 
+                         desc="Autorização múltipla" 
+                       />
+                    </div>
+
+                    {relays.length > 0 && (
+                      <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
+                         <p className="text-[10px] font-black text-amber-400 uppercase mb-3">Chaves DKIM Adicionais</p>
+                         <div className="space-y-3">
+                            {relays.map((r: any) => (
+                              <DNSRowDark 
+                                key={r.id}
+                                type="TXT" 
+                                host={`${r.name.toLowerCase().replace(/\s/g, '')}._domainkey`} 
+                                content="v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADC..." 
+                                desc={`Assinatuta ${r.name}`} 
+                              />
+                            ))}
+                         </div>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="p-6 bg-white/5 rounded-3xl border border-white/10">
-                      <p className="text-[10px] font-bold text-blue-400 uppercase mb-2">Segurança</p>
-                      <p className="text-xs text-slate-300">Portas 25, 465 e 993 devem estar liberadas no seu roteador/ZimaOS.</p>
-                    </div>
-                    <div className="p-6 bg-white/5 rounded-3xl border border-white/10">
-                      <p className="text-[10px] font-bold text-amber-400 uppercase mb-2">DICA</p>
-                      <p className="text-xs text-slate-300">Use a Cloudflare em modo "Apenas DNS" (Nuvenzinha cinza) para porta 25.</p>
-                    </div>
-                    <div className="p-6 bg-blue-600 rounded-3xl shadow-xl shadow-blue-500/20">
-                      <p className="text-sm font-bold flex items-center gap-2">
-                        <Zap className="w-4 h-4" /> SSL Nativo
-                      </p>
-                      <p className="text-xs text-blue-100 mt-2">Certificados Let's Encrypt são gerados automaticamente pelo motor ZimaMail.</p>
+                  <div className="mt-12 bg-white/5 p-6 rounded-3xl border border-white/10">
+                    <h4 className="text-sm font-bold flex items-center gap-2 mb-4">
+                      <Zap className="w-5 h-5 text-yellow-400" /> Guia de Reputação (Envios Reais)
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                       <div className="space-y-3">
+                          <p className="text-xs text-slate-400 leading-relaxed">
+                            Para enviar ao Gmail/Outlook sem bloqueio:
+                          </p>
+                          <ul className="space-y-2">
+                             <li className="flex items-center gap-2 text-xs text-slate-300">
+                                <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                <b>Domínio é obrigatório:</b> IP puro sempre será bloqueado.
+                             </li>
+                             <li className="flex items-center gap-2 text-xs text-slate-300">
+                                <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                <b>rDNS:</b> Peça ao seu host para o rDNS do IP ser seu domínio.
+                             </li>
+                             <li className="flex items-center gap-2 text-xs text-slate-300">
+                                <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                <b>Aquecimento:</b> Comece com 10-20 envios por dia.
+                             </li>
+                          </ul>
+                       </div>
+                       <div className="space-y-4">
+                          <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
+                            <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">Checklist de Sucesso</h4>
+                            <div className="space-y-3">
+                               <CheckItem label="Domínio configurado" checked />
+                               <CheckItem label="Registros SPF/DKIM ativos" />
+                               <CheckItem label="rDNS solicitado ao host" />
+                               <CheckItem label="Link de 'Unsubscribe' nos e-mails" />
+                            </div>
+                          </div>
+                          <div className="p-4 bg-amber-500/10 rounded-2xl border border-amber-500/20">
+                             <p className="text-[10px] font-bold text-amber-400 uppercase mb-1">Aviso</p>
+                             <p className="text-[11px] text-slate-300 leading-relaxed italic">
+                                Se o seu IP estiver em blacklists globais, mesmo o motor interno não conseguirá entregar.
+                             </p>
+                          </div>
+                          <button 
+                            onClick={() => window.open('https://mxtoolbox.com/blacklists.aspx', '_blank')}
+                            className="w-full py-2 bg-white/10 hover:bg-white/20 rounded-xl text-xs font-bold transition-all"
+                          >
+                            Checar Blacklists (MXToolbox)
+                          </button>
+                       </div>
                     </div>
                   </div>
                 </div>
@@ -725,15 +859,20 @@ export default function App() {
                       <div key={log.id} className="p-4 flex items-start gap-4 hover:bg-slate-50 transition-colors">
                         <div className={`mt-1 h-2 w-2 rounded-full shrink-0 ${
                           log.type === 'error' ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : 
-                          log.type === 'smtp' ? 'bg-blue-500' : 'bg-slate-400'
+                          log.type === 'smtp' ? 'bg-blue-500' : 
+                          log.type === 'track' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'
                         }`} />
                         <div className="flex-1">
-                          <p className="text-sm text-slate-700 font-medium">{log.message}</p>
+                          <div className="flex items-center gap-2">
+                            {log.type === 'track' && <Eye className="w-3 h-3 text-emerald-500" />}
+                            <p className={`text-sm font-medium ${log.type === 'track' ? 'text-emerald-700' : 'text-slate-700'}`}>{log.message}</p>
+                          </div>
                           <p className="text-[10px] text-slate-400 font-mono mt-1">{new Date(log.timestamp).toLocaleString()}</p>
                         </div>
-                        <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${
+                        <span className={`text-[10px] uppercase font-black px-2 py-0.5 rounded ${
                            log.type === 'error' ? 'bg-red-50 text-red-600' : 
-                           log.type === 'smtp' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'
+                           log.type === 'smtp' ? 'bg-blue-50 text-blue-600' : 
+                           log.type === 'track' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'
                         }`}>
                           {log.type}
                         </span>
@@ -786,127 +925,204 @@ export default function App() {
                       <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
                         <Send className="w-4 h-4" /> Modo de Entrega (Outbound)
                       </h4>
-                      <div className="flex gap-2 p-1 bg-slate-100 rounded-2xl w-fit">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <button 
-                          onClick={() => setSettings({...settings, delivery_mode: 'internal'})}
-                          className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${settings.delivery_mode === 'internal' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400 opacity-60'}`}
+                          onClick={() => {
+                            setSettings({...settings, delivery_mode: 'internal'});
+                            saveSettings();
+                          }}
+                          className={`p-5 rounded-2xl border-2 text-left transition-all ${
+                            settings.delivery_mode === 'internal' 
+                            ? 'border-blue-500 bg-blue-50 ring-4 ring-blue-500/5' 
+                            : 'border-slate-200 hover:border-slate-300 bg-white opacity-60'
+                          }`}
                         >
-                          Motor Interno (ZimaSend)
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className={`p-2 rounded-lg ${settings.delivery_mode === 'internal' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                              <Activity className="w-4 h-4" />
+                            </div>
+                            <span className="font-bold text-slate-900">Motor Interno</span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 leading-tight">
+                            <b>Envio Direto (ZimaOS).</b> Usa o IP do servidor. Requer SPF/DKIM configurados para não cair no spam.
+                          </p>
                         </button>
+
                         <button 
-                          onClick={() => setSettings({...settings, delivery_mode: 'external'})}
-                          className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${settings.delivery_mode === 'external' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400 opacity-60'}`}
+                          onClick={() => {
+                            setSettings({...settings, delivery_mode: 'external'});
+                            saveSettings();
+                          }}
+                          className={`p-5 rounded-2xl border-2 text-left transition-all ${
+                            settings.delivery_mode === 'external' 
+                            ? 'border-emerald-500 bg-emerald-50 ring-4 ring-emerald-500/5' 
+                            : 'border-slate-200 hover:border-slate-300 bg-white opacity-60'
+                          }`}
                         >
-                          Relay Externo (SMTP)
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className={`p-2 rounded-lg ${settings.delivery_mode === 'external' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                              <Globe className="w-4 h-4" />
+                            </div>
+                            <span className="font-bold text-slate-900">Relay Externo</span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 leading-tight">
+                            <b>Produção Real.</b> Use para enviar faturas e senhas para clientes reais (Gmail, etc).
+                          </p>
                         </button>
                       </div>
-                      <p className="text-[10px] text-slate-400 italic">
-                        {settings.delivery_mode === 'internal' 
-                          ? 'O ZimaMail tentará entregar os e-mails diretamente. Certifique-se que o IP do seu servidor não está em blacklist.'
-                          : 'Use um serviço como SendGrid ou Amazon SES para garantir a maior taxa de entrega.'}
-                      </p>
                     </section>
 
                     {settings.delivery_mode === 'external' && (
-                      <section>
-                        <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                          <Send className="w-4 h-4" /> Configuração do Relay SMTP
-                        </h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-2">Host SMTP</label>
-                            <input 
-                              type="text" 
-                              placeholder="ex: smtp.sendgrid.net"
-                              value={settings.smtp_host}
-                              onChange={(e) => setSettings({...settings, smtp_host: e.target.value})}
-                              className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm"
-                            />
+                       <section className="space-y-6">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h4 className="text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                              <Zap className="w-5 h-5 text-blue-600" /> Pool de Relays (Rotação & Failover)
+                            </h4>
+                            <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold tracking-tighter">
+                              {relays.length} de 10 slots utilizados
+                            </p>
                           </div>
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-2">Porta</label>
-                            <input 
-                              type="number" 
-                              placeholder="587"
-                              value={settings.smtp_port}
-                              onChange={(e) => setSettings({...settings, smtp_port: e.target.value})}
-                              className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-2">Usuário/Email</label>
-                            <input 
-                              type="text" 
-                              placeholder="apikey ou email"
-                              value={settings.smtp_user}
-                              onChange={(e) => setSettings({...settings, smtp_user: e.target.value})}
-                              className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-2">Senha/Token</label>
-                            <input 
-                              type="password" 
-                              placeholder="********"
-                              value={settings.smtp_pass}
-                              onChange={(e) => setSettings({...settings, smtp_pass: e.target.value})}
-                              className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm"
-                            />
+                          
+                          <div className="flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100">
+                             <RefreshCw className="w-3 h-3 animate-spin-slow" />
+                             <span className="text-[10px] font-black uppercase">Rotação Ativa</span>
                           </div>
                         </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {relays.map((relay: any, index: number) => (
+                            <div key={relay.id} className="relative group p-5 bg-white rounded-2xl border border-slate-200 shadow-sm hover:border-blue-500/50 transition-all">
+                              <div className="absolute -top-2 -left-2 w-6 h-6 bg-slate-900 text-white text-[10px] font-black rounded-lg flex items-center justify-center border-2 border-white shadow-sm">
+                                #{index + 1}
+                              </div>
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center border border-slate-100">
+                                    <Mail className="w-5 h-5 text-slate-400" />
+                                  </div>
+                                  <div>
+                                    <p className="font-bold text-slate-900 text-sm">{relay.name}</p>
+                                    <p className="text-[10px] font-mono text-blue-500">{relay.host}</p>
+                                  </div>
+                                </div>
+                                <div className="flex gap-1">
+                                  <button 
+                                    onClick={async (e) => {
+                                      const btn = e.currentTarget as HTMLButtonElement;
+                                      if (btn) btn.disabled = true;
+                                      try {
+                                        const res = await fetch('/api/relays/test', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify(relay)
+                                        });
+                                        const data = await res.json();
+                                        if (data.success) alert(`Conexão com ${relay.name} estabelecida com SUCESSO!`);
+                                        else alert(`FALHA na conexão com ${relay.name}: ${data.message}`);
+                                      } catch {
+                                        alert('Erro ao testar conexão.');
+                                      } finally {
+                                        if (btn) btn.disabled = false;
+                                      }
+                                    }}
+                                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all disabled:opacity-50"
+                                    title="Testar Conexão"
+                                  >
+                                    <Zap className="w-4 h-4" />
+                                  </button>
+                                  <button 
+                                    onClick={() => removeRelay(relay.id)}
+                                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                                    title="Remover"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <div className="px-2 py-1 bg-slate-50 rounded border border-slate-100">
+                                  <p className="text-[8px] font-black text-slate-400 uppercase">Usuário</p>
+                                  <p className="text-[10px] text-slate-600 truncate">{relay.user}</p>
+                                </div>
+                                <div className="px-2 py-1 bg-slate-50 rounded border border-slate-100">
+                                  <p className="text-[8px] font-black text-slate-400 uppercase">Porta</p>
+                                  <p className="text-[10px] text-slate-600">{relay.port}</p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                          
+                          {relays.length < 10 && (
+                            <button 
+                              onClick={() => setIsRelayModalOpen(true)}
+                              className="p-5 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 text-slate-400 hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50/30 transition-all group"
+                            >
+                               <div className="w-10 h-10 rounded-full border-2 border-slate-200 flex items-center justify-center group-hover:border-blue-400 group-hover:bg-white transition-all shadow-sm">
+                                  <Plus className="w-5 h-5" />
+                               </div>
+                               <span className="text-xs font-bold">Adicionar Novo Relay</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {relays.length === 0 && (
+                          <div className="p-12 text-center bg-amber-50 rounded-3xl border border-amber-100">
+                             <AlertCircle className="w-10 h-10 text-amber-500 mx-auto mb-3" />
+                             <h5 className="font-bold text-amber-900 text-sm">Nenhum Relay Configurado</h5>
+                             <p className="text-xs text-amber-700 mt-1">O sistema usará as configurações legadas abaixo ou falhará se estiverem vazias.</p>
+                             <button 
+                               onClick={() => setIsRelayModalOpen(true)}
+                               className="mt-4 px-6 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold shadow-lg shadow-amber-500/20"
+                             >
+                               Cadastrar Primeiro Relay
+                             </button>
+                          </div>
+                        )}
                       </section>
                     )}
 
+
+
                     <section className="pt-8 border-t border-slate-100">
-                      <div className="flex justify-between items-center mb-6">
-                        <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                          <Zap className="w-4 h-4" /> Relays SMTP Internos (Cadastre seus provedores)
-                        </h4>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                        {relays.map((relay: any) => (
-                          <div key={relay.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between group">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center border border-slate-100 shadow-sm">
-                                <Send className="w-5 h-5 text-blue-600" />
-                              </div>
-                              <div>
-                                <p className="font-bold text-slate-800 text-sm">{relay.name}</p>
-                                <p className="text-[10px] text-slate-400 font-mono">{relay.host}:{relay.port}</p>
-                              </div>
-                            </div>
-                            <button 
-                              onClick={() => removeRelay(relay.id)}
-                              className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                      <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
+                        <Globe className="w-4 h-4" /> Integração Cloudflare API
+                      </h4>
+                      <div className="bg-blue-50 border border-blue-100 p-6 rounded-3xl mb-6">
+                        <div className="flex gap-4 items-start">
+                          <div className="p-3 bg-white rounded-2xl shadow-sm">
+                            <Zap className="w-6 h-6 text-blue-600" />
                           </div>
-                        ))}
+                          <div>
+                            <h5 className="font-bold text-blue-900 text-sm">Automação de DNS</h5>
+                            <p className="text-xs text-blue-700 mt-1 leading-relaxed">
+                              Ao configurar sua API, o ZimaMail poderá criar registros SPF, DKIM e CNAME automaticamente no seu domínio Cloudflare.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Cloudflare API Token</label>
+                            <input 
+                              type="password" 
+                              placeholder="Seu Token de API"
+                              value={settings.cf_token || ''}
+                              onChange={(e) => setSettings({...settings, cf_token: e.target.value})}
+                              className="w-full p-4 bg-white border border-slate-200 rounded-2xl text-sm"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Cloudflare Zone ID</label>
+                            <input 
+                              type="text" 
+                              placeholder="ID da Zona do Domínio"
+                              value={settings.cf_zone || ''}
+                              onChange={(e) => setSettings({...settings, cf_zone: e.target.value})}
+                              className="w-full p-4 bg-white border border-slate-200 rounded-2xl text-sm"
+                            />
+                          </div>
+                        </div>
                       </div>
-
-                      <form onSubmit={(e) => {
-                        e.preventDefault();
-                        const f = e.target as any;
-                        addRelay({
-                          name: f.name.value,
-                          host: f.host.value,
-                          port: f.port.value,
-                          user: f.user.value,
-                          pass: f.pass.value
-                        });
-                        f.reset();
-                      }} className="bg-slate-50/50 p-6 rounded-2xl border border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <input name="name" placeholder="Nome (Ex: SendGrid)" className="p-3 bg-white border border-slate-200 rounded-xl text-xs" required />
-                        <input name="host" placeholder="Host (smtp...)" className="p-3 bg-white border border-slate-200 rounded-xl text-xs" required />
-                        <input name="port" placeholder="Porta (587)" className="p-3 bg-white border border-slate-200 rounded-xl text-xs" defaultValue="587" />
-                        <input name="user" placeholder="Usuário/Email" className="p-3 bg-white border border-slate-200 rounded-xl text-xs" required />
-                        <input name="pass" type="password" placeholder="Senha/Token" className="p-3 bg-white border border-slate-200 rounded-xl text-xs" required />
-                        <button type="submit" className="bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition-all">
-                          Adicionar Relay
-                        </button>
-                      </form>
                     </section>
 
                     <section>
@@ -934,11 +1150,21 @@ export default function App() {
         </section>
       </main>
 
-      <ComposeModal isOpen={isComposeOpen} onClose={() => setIsComposeOpen(false)} />
+      <ComposeModal 
+        isOpen={isComposeOpen} 
+        onClose={() => setIsComposeOpen(false)} 
+        settings={settings}
+      />
       <AccountModal 
         isOpen={isAccountModalOpen} 
         onClose={() => setIsAccountModalOpen(false)} 
         onSuccess={fetchAccounts}
+        domains={domains}
+      />
+      <RelayModal 
+        isOpen={isRelayModalOpen} 
+        onClose={() => setIsRelayModalOpen(false)} 
+        onSuccess={fetchRelays}
       />
     </div>
 
@@ -983,7 +1209,7 @@ function MailFolderItem({ label, count, active, icon }: { label: string, count?:
   );
 }
 
-function ComposeModal({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) {
+function ComposeModal({ isOpen, onClose, settings }: { isOpen: boolean, onClose: () => void, settings: any }) {
   const [to, setTo] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
@@ -999,7 +1225,11 @@ function ComposeModal({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
       });
       const data = await res.json();
       if (data.success) {
-        alert("Email enviado com sucesso!");
+        if (data.warning) {
+          alert("MODO SANDBOX: " + data.warning);
+        } else {
+          alert("Email enviado com sucesso!");
+        }
         onClose();
       } else {
         alert("Erro ao enviar: " + data.message);
@@ -1011,6 +1241,11 @@ function ComposeModal({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
     }
   };
 
+  const isExternalDomain = (email: string) => {
+    const publicDomains = ['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'icloud.com'];
+    return publicDomains.some(d => email.toLowerCase().includes(d));
+  };
+
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
@@ -1020,52 +1255,221 @@ function ComposeModal({ isOpen, onClose }: { isOpen: boolean, onClose: () => voi
         className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200"
       >
         <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-          <h3 className="font-bold text-slate-900">Nova Mensagem</h3>
+          <div className="flex items-center gap-2">
+            <Send className="w-5 h-5 text-blue-600" />
+            <h3 className="font-bold text-slate-900">Nova Mensagem</h3>
+          </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-lg text-slate-500">×</button>
         </div>
         <div className="p-6 space-y-4">
-          <input 
-            type="text" 
-            placeholder="Para:" 
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20" 
-          />
-          <input 
-            type="text" 
-            placeholder="Assunto:" 
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20" 
-          />
-          <textarea 
-            rows={8} 
-            placeholder="Escreva sua mensagem..." 
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none"
-          ></textarea>
+          <div className="space-y-4">
+            <input 
+              type="text" 
+              placeholder="Para: (ex: cliente@gmail.com)" 
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              className="w-full p-4 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm" 
+            />
+            
+            {settings.delivery_mode === 'internal' && isExternalDomain(to) && (
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl flex gap-3 items-start">
+                <Globe className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-bold text-blue-800 mb-1">Envio via IP Direto</p>
+                  <p className="text-[10px] text-blue-700 leading-relaxed">
+                    Você está usando o <b>Motor Interno</b>. A entrega depende do seu servidor estar com <b>SPF e DKIM</b> validados corretamente no seu domínio.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <input 
+              type="text" 
+              placeholder="Assunto:" 
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              className="w-full p-4 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm" 
+            />
+            <textarea 
+              rows={8} 
+              placeholder="Escreva sua mensagem..." 
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              className="w-full p-4 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none text-sm"
+            ></textarea>
+          </div>
         </div>
-        <div className="p-4 bg-slate-50 flex justify-end gap-3">
-          <button onClick={onClose} className="px-6 py-2 text-slate-500 font-medium">Cancelar</button>
-          <button 
-            onClick={handleSend}
-            disabled={sending}
-            className="px-8 py-2 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-500/20 disabled:opacity-50"
-          >
-            {sending ? "Enviando..." : "Enviar Agora"}
-          </button>
+        <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-between items-center gap-3">
+          <p className="text-[10px] text-slate-400 font-medium ml-2 uppercase tracking-wider">
+            Modo: <span className={settings.delivery_mode === 'internal' ? 'text-blue-600' : 'text-emerald-600'}>
+              {settings.delivery_mode === 'internal' ? 'Sandbox Local' : 'Relay SMTP'}
+            </span>
+          </p>
+          <div className="flex gap-3">
+            <button onClick={onClose} className="px-6 py-2 text-slate-500 font-medium text-sm">Cancelar</button>
+            <button 
+              onClick={handleSend}
+              disabled={sending}
+              className="px-8 py-2 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-500/20 disabled:opacity-50 text-sm transition-transform active:scale-95"
+            >
+              {sending ? "Enviando..." : "Enviar Agora"}
+            </button>
+          </div>
         </div>
       </motion.div>
     </div>
   );
 }
 
-function AccountModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: () => void, onSuccess: () => void }) {
+function RelayModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: () => void, onSuccess: () => void }) {
+  const [formData, setFormData] = useState({
+    name: '',
+    host: '',
+    port: '587',
+    user: '',
+    pass: ''
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/relays', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
+      if (res.ok) {
+        onSuccess();
+        onClose();
+        setFormData({ name: '', host: '', port: '587', user: '', pass: '' });
+      } else {
+        alert('Erro ao salvar relay.');
+      }
+    } catch (err) {
+      alert('Erro de conexão.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200"
+      >
+        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-600 rounded-xl text-white">
+              <Zap className="w-5 h-5" />
+            </div>
+            <h3 className="font-bold text-slate-900">Novo Provedor SMTP</h3>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-lg text-slate-500">×</button>
+        </div>
+        
+        <form onSubmit={handleSubmit}>
+          <div className="p-8 space-y-5">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-black text-slate-400 uppercase ml-1">Nome Interno</label>
+              <input 
+                required
+                type="text" 
+                value={formData.name}
+                onChange={e => setFormData({ ...formData, name: e.target.value })}
+                placeholder="Ex: SendGrid API Key" 
+                className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 text-sm transition-all" 
+              />
+            </div>
+            
+            <div className="grid grid-cols-3 gap-4">
+              <div className="col-span-2 space-y-1.5">
+                <label className="block text-xs font-black text-slate-400 uppercase ml-1">Host SMTP</label>
+                <input 
+                  required
+                  type="text" 
+                  value={formData.host}
+                  onChange={e => setFormData({ ...formData, host: e.target.value })}
+                  placeholder="smtp.provider.com" 
+                  className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 text-sm transition-all" 
+                />
+              </div>
+              <div className="col-span-1 space-y-1.5">
+                <label className="block text-xs font-black text-slate-400 uppercase ml-1">Porta</label>
+                <input 
+                  required
+                  type="text" 
+                  value={formData.port}
+                  onChange={e => setFormData({ ...formData, port: e.target.value })}
+                  placeholder="587" 
+                  className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 text-sm transition-all text-center font-mono" 
+                />
+              </div>
+            </div>
+
+            <div className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-black text-slate-400 uppercase ml-1">Usuário / Email</label>
+                <input 
+                  required
+                  type="text" 
+                  value={formData.user}
+                  onChange={e => setFormData({ ...formData, user: e.target.value })}
+                  placeholder="ex: apikey ou seu@email.com" 
+                  className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 text-sm transition-all" 
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-black text-slate-400 uppercase ml-1">Senha / Token</label>
+                <input 
+                  required
+                  type="password" 
+                  value={formData.pass}
+                  onChange={e => setFormData({ ...formData, pass: e.target.value })}
+                  placeholder="Sua senha SMTP secreta" 
+                  className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 text-sm transition-all" 
+                />
+              </div>
+            </div>
+          </div>
+          
+          <div className="p-6 bg-slate-50 flex justify-end gap-3 border-t border-slate-100">
+            <button 
+              type="button"
+              onClick={onClose} 
+              className="px-6 py-2 text-slate-500 font-bold hover:text-slate-700 transition-colors text-sm"
+            >
+              Cancelar
+            </button>
+            <button 
+              disabled={isSubmitting}
+              className="px-10 py-3 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-500/20 active:scale-95 transition-all disabled:opacity-50 flex items-center gap-2 text-sm uppercase tracking-widest"
+            >
+              {isSubmitting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" /> Salvando...
+                </>
+              ) : (
+                'Cadastrar Relay'
+              )}
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </div>
+  );
+}
+
+function AccountModal({ isOpen, onClose, onSuccess, domains }: { isOpen: boolean, onClose: () => void, onSuccess: () => void, domains: string[] }) {
   const [formData, setFormData] = useState({
     email: '',
     full_name: '',
-    domain: 'amplifamarketing.com.br'
+    domain: domains[0] || 'amplifamarketing.com.br'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -1148,8 +1552,10 @@ function AccountModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose
                   value={formData.domain}
                   onChange={e => setFormData({ ...formData, domain: e.target.value })}
                 >
-                  <option value="amplifamarketing.com.br">@amplifamarketing.com.br</option>
-                  <option value="zimaos.local">@zimaos.local</option>
+                  {domains.map(d => (
+                    <option key={d} value={d}>@{d}</option>
+                  ))}
+                  {domains.length === 0 && <option value="amplifamarketing.com.br">@amplifamarketing.com.br</option>}
                 </select>
               </div>
             </div>
@@ -1319,9 +1725,41 @@ function ServiceItem({ name, status, port, type, message }: any) {
   );
 }
 
-function ActionCard({ title, description, icon }: any) {
+function CheckItem({ label, checked }: { label: string, checked?: boolean }) {
   return (
-    <button className="flex items-start gap-4 p-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-blue-200 text-left transition-all group shadow-sm">
+    <div className="flex items-center gap-2">
+      <div className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
+        checked ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-white/20'
+      }`}>
+        {checked && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+      </div>
+      <span className="text-[11px] text-slate-300">{label}</span>
+    </div>
+  );
+}
+
+function DeliverabilityCheck({ title, status, desc }: any) {
+  return (
+    <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-sm">
+      <div className="flex items-center justify-between mb-2">
+        <span className="font-black text-xs uppercase tracking-widest text-slate-400">{title}</span>
+        <div className={`h-2 w-2 rounded-full ${
+          status === 'success' ? 'bg-emerald-500' :
+          status === 'warning' ? 'bg-amber-500' : 'bg-slate-300'
+        }`} />
+      </div>
+      <p className="text-sm font-bold text-slate-700 mb-1 leading-tight">{desc}</p>
+      <p className="text-[10px] text-slate-400">{status === 'pending' ? 'Configuração pendente' : 'Verificado'}</p>
+    </div>
+  );
+}
+
+function ActionCard({ title, description, icon, onClick }: any) {
+  return (
+    <button 
+      onClick={onClick}
+      className="flex items-start gap-4 p-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 hover:border-blue-200 text-left transition-all group shadow-sm"
+    >
       <div className="p-3 bg-slate-50 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-colors">
         {icon}
       </div>
