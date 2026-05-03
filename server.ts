@@ -17,6 +17,7 @@ const LOGS_FILE = path.join(DATA_DIR, "logs.json");
 const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
 const DOMAINS_FILE = path.join(DATA_DIR, "domains.json");
 const RELAYS_FILE = path.join(DATA_DIR, "relays.json");
+const CAMPAIGNS_FILE = path.join(DATA_DIR, "campaigns.json");
 
 async function initStorage() {
   try {
@@ -43,7 +44,8 @@ async function initStorage() {
         port: process.env.SMTP_PORT || "587",
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
-      }] : [] }
+      }] : [] },
+      { path: CAMPAIGNS_FILE, default: [] }
     ];
     for (const file of files) {
       try {
@@ -216,6 +218,34 @@ async function startServer() {
     } catch (e) { res.json([]); }
   });
 
+  app.get("/api/campaigns", async (req, res) => {
+    try {
+      const content = await fs.readFile(CAMPAIGNS_FILE, "utf-8");
+      res.json(JSON.parse(content));
+    } catch (e) { res.json([]); }
+  });
+
+  app.post("/api/campaigns", async (req, res) => {
+    try {
+      const campaign = { 
+        id: Date.now().toString(), 
+        createdAt: new Date().toISOString(),
+        status: 'sending',
+        opens: 0,
+        clicks: 0,
+        ...req.body 
+      };
+      const content = await fs.readFile(CAMPAIGNS_FILE, "utf-8");
+      const campaigns = JSON.parse(content);
+      campaigns.push(campaign);
+      await fs.writeFile(CAMPAIGNS_FILE, JSON.stringify(campaigns, null, 2));
+      await addLog(`Nova campanha iniciada: ${campaign.name}`, "info");
+      res.json({ success: true, campaign });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   app.post("/api/relays", async (req, res) => {
     try {
       const relay = { id: Date.now().toString(), ...req.body };
@@ -252,15 +282,29 @@ async function startServer() {
         return res.status(400).json({ success: false, message: "API Token ou Zone ID ausentes." });
       }
 
+      // Tentar obter o IP público automaticamente se não estiver no ENV
+      let publicIp = process.env.SERVER_IP;
+      if (!publicIp || publicIp === '127.0.0.1') {
+        try {
+          const ipRes = await fetch('https://api.ipify.org?format=json');
+          const ipData: any = await ipRes.json();
+          publicIp = ipData.ip;
+          await addLog(`IP Público detectado automaticamente: ${publicIp}`, "info");
+        } catch (e) {
+          publicIp = '127.0.0.1';
+          await addLog("Não foi possível detectar IP público, usando fallback.", "error");
+        }
+      }
+
       const headers = {
         'Authorization': `Bearer ${settings.cf_token}`,
         'Content-Type': 'application/json'
       };
 
       // 1. Gerar SPF Combinado
-      const spfContent = `v=spf1 ip4:${process.env.SERVER_IP || '127.0.0.1'} ${relays.map((r:any) => `include:${r.host.split('.').slice(-2).join('.')}`).join(' ')} ~all`;
+      const spfContent = `v=spf1 ip4:${publicIp} ${relays.map((r:any) => `include:${r.host.split('.').slice(-2).join('.')}`).join(' ')} ~all`;
       
-      // 2. Buscar registros existentes para evitar duplicidade ou atualizar
+      // 2. Buscar registros existentes
       const getRecords = await fetch(`https://api.cloudflare.com/client/v4/zones/${settings.cf_zone}/dns_records`, { headers });
       const recordsData: any = await getRecords.json();
       
@@ -268,14 +312,13 @@ async function startServer() {
 
       const results = [];
 
-      // Função auxiliar para Upsert (Update or Insert)
-      const upsertRecord = async (type: string, name: string, content: string) => {
-        const existing = recordsData.result.find((r: any) => r.type === type && r.name.includes(name));
+      const upsertRecord = async (type: string, name: string, content: string, proxied = false) => {
+        const existing = recordsData.result.find((r: any) => r.type === type && (r.name === name || r.name === `${name}.${settings.domain}`));
         const url = existing 
           ? `https://api.cloudflare.com/client/v4/zones/${settings.cf_zone}/dns_records/${existing.id}`
           : `https://api.cloudflare.com/client/v4/zones/${settings.cf_zone}/dns_records`;
         
-        await fetch(url, {
+        const res = await fetch(url, {
           method: existing ? 'PUT' : 'POST',
           headers,
           body: JSON.stringify({
@@ -283,11 +326,20 @@ async function startServer() {
             name,
             content,
             ttl: 1,
-            proxied: false // Sempre modo DNS-Only
+            proxied
           })
         });
-        return { type, name, status: existing ? 'updated' : 'created' };
+        const data:any = await res.json();
+        if (!data.success) {
+          await addLog(`Erro ao sincronizar ${type} ${name}: ${JSON.stringify(data.errors)}`, "error");
+        }
+        return { type, name, status: existing ? 'updated' : 'created', success: data.success };
       };
+
+      // Sync A Record (Apontamento principal)
+      if (publicIp !== '127.0.0.1') {
+        results.push(await upsertRecord('A', '@', publicIp));
+      }
 
       // Sync SPF
       results.push(await upsertRecord('TXT', '@', spfContent));
@@ -298,8 +350,8 @@ async function startServer() {
         results.push(await upsertRecord('TXT', `${selector}._domainkey`, 'v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADC...'));
       }
 
-      await addLog(`DNS Sincronizado via Cloudflare API: ${results.length} registros processados.`, "info");
-      res.json({ success: true, results });
+      await addLog(`DNS Sincronizado via Cloudflare: ${results.length} registros processados (IP: ${publicIp}).`, "info");
+      res.json({ success: true, results, publicIp });
     } catch (error: any) {
       await addLog(`Erro na sincronização Cloudflare: ${error.message}`, "error");
       res.status(500).json({ success: false, message: error.message });
@@ -359,6 +411,21 @@ async function startServer() {
     try {
       await addLog(`EMAIL ABERTO: Rastreio #${emailId}`, "track");
       
+      // Se for rastreio de campanha (começa com c_)
+      if (emailId.startsWith('c_')) {
+        const parts = emailId.split('_');
+        const campaignId = parts[1];
+        
+        const content = await fs.readFile(CAMPAIGNS_FILE, "utf-8");
+        const campaigns = JSON.parse(content);
+        const campaign = campaigns.find((c: any) => c.id === campaignId);
+        
+        if (campaign) {
+          campaign.opens = (campaign.opens || 0) + 1;
+          await fs.writeFile(CAMPAIGNS_FILE, JSON.stringify(campaigns, null, 2));
+        }
+      }
+
       // Retornar um GIF transparente de 1x1 pixel
       const pixel = Buffer.from(
         "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
@@ -377,6 +444,32 @@ async function startServer() {
     }
   });
 
+  app.get("/api/click", async (req, res) => {
+    const { url, id } = req.query;
+    if (!url) return res.redirect('/');
+
+    try {
+      if (id && typeof id === 'string' && id.startsWith('c_')) {
+        const parts = id.split('_');
+        const campaignId = parts[1];
+        
+        const content = await fs.readFile(CAMPAIGNS_FILE, "utf-8");
+        const campaigns = JSON.parse(content);
+        const campaign = campaigns.find((c: any) => c.id === campaignId);
+        
+        if (campaign) {
+          campaign.clicks = (campaign.clicks || 0) + 1;
+          await fs.writeFile(CAMPAIGNS_FILE, JSON.stringify(campaigns, null, 2));
+        }
+      }
+      await addLog(`CLIQUE: ${url} (ID: ${id})`, "track");
+    } catch (e) {
+      console.error('Erro no rastreio de clique:', e);
+    }
+
+    res.redirect(url as string);
+  });
+
   app.get("/api/mail/inbox", async (req, res) => {
     try {
       const content = await fs.readFile(EMAILS_FILE, "utf-8");
@@ -388,7 +481,7 @@ async function startServer() {
   });
 
   app.post("/api/mail/send", async (req, res) => {
-    const { to, subject, body } = req.body;
+    const { to, subject, body, from, campaignId } = req.body;
     try {
       const settings = JSON.parse(await fs.readFile(SETTINGS_FILE, "utf-8"));
       const relays = JSON.parse(await fs.readFile(RELAYS_FILE, "utf-8"));
@@ -396,6 +489,8 @@ async function startServer() {
       let success = false;
       let lastError = null;
       let usedRelayName = "Nenhum";
+
+      const fromAddr = from || `system@${settings.domain}`;
 
       if (settings.delivery_mode === "external") {
         const availableRelays = [...relays];
@@ -420,6 +515,14 @@ async function startServer() {
           try {
             await addLog(`Tentando relay #${i + 1}: ${relay.name || relay.host}`, "smtp");
             
+            // Debug DNS
+            try {
+              const { family } = await dns.lookup(relay.host);
+              await addLog(`DNS OK para ${relay.host} (IPv${family})`, "info");
+            } catch (dnsErr: any) {
+              await addLog(`DNS FALHA para ${relay.host}: ${dnsErr.message}`, "error");
+            }
+
             const transporter = nodemailer.createTransport({
               host: relay.host,
               port: parseInt(relay.port),
@@ -428,62 +531,83 @@ async function startServer() {
               timeout: 10000 // 10 segundos de timeout por relay
             });
 
-            const trackingId = `out_${Date.now()}`;
+            // IDs de rastreio agora podem carregar o campaignId
+            const trackingId = campaignId ? `c_${campaignId}_${Date.now()}` : `out_${Date.now()}`;
             const protocol = req.headers['x-forwarded-proto'] || 'http';
             const host = req.get('host');
+            
+            // Tracking de abertura
             const trackingPixel = `<img src="${protocol}://${host}/api/track/${trackingId}" width="1" height="1" style="display:none" />`;
-            const trackedBody = body + trackingPixel;
+            
+            // Tracking de cliques: Substituir links no HTML
+            let trackedBody = body + trackingPixel;
+            
+            if (body && typeof body === 'string') {
+              const linkRegex = /<a\s+(?:[^>]*?\s+)?href="([^"]*)"([^>]*)>/gi;
+              trackedBody = body.replace(linkRegex, (match, url, attributes) => {
+                if (url.startsWith('mailto:') || url.startsWith('#')) return match;
+                const trackingLink = `${protocol}://${host}/api/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
+                return `<a href="${trackingLink}"${attributes}>`;
+              }) + trackingPixel;
+            }
 
             await transporter.sendMail({
-              from: `"ZimaMail" <system@${settings.domain}>`,
+              from: `"ZimaMail" <${fromAddr}>`,
               to, subject, html: trackedBody
             });
 
             usedRelayName = relay.name || relay.host;
             success = true;
-            await addLog(`Email entregue via ${usedRelayName}`, "smtp");
-            break; // Sai do loop se enviou com sucesso
+            await addLog(`Email enviado: ${to} (via ${usedRelayName})`, "smtp");
+            break; 
           } catch (relayErr: any) {
             lastError = relayErr.message;
-            await addLog(`Relay ${relay.name || relay.host} FALHOU: ${relayErr.message}. Tentando próximo...`, "error");
+            await addLog(`Relay ${relay.name || relay.host} FALHOU: ${relayErr.message}`, "error");
           }
         }
       } else {
         // Modo Entrega Direta (Interno Real) 
-        await addLog(`Realizando entrega direta (ZimaOS) para ${to}`, "info");
+        await addLog(`Entrega direta para ${to}`, "info");
         const transporter = nodemailer.createTransport({
           sendmail: true,
           newline: 'unix',
           path: '/usr/sbin/sendmail'
         });
 
-        const trackingId = `out_${Date.now()}`;
+        // IDs de rastreio agora podem carregar o campaignId
+        const trackingId = campaignId ? `c_${campaignId}_${Date.now()}` : `out_${Date.now()}`;
         const protocol = req.headers['x-forwarded-proto'] || 'http';
         const host = req.get('host');
+        
+        // Tracking de abertura
         const trackingPixel = `<img src="${protocol}://${host}/api/track/${trackingId}" width="1" height="1" style="display:none" />`;
-        const trackedBody = body + trackingPixel;
+        
+        // Tracking de cliques: Substituir links no HTML
+        let trackedBody = body + trackingPixel;
+        if (body && typeof body === 'string') {
+          const linkRegex = /<a\s+(?:[^>]*?\s+)?href="([^"]*)"([^>]*)>/gi;
+          trackedBody = body.replace(linkRegex, (match, url, attributes) => {
+            if (url.startsWith('mailto:') || url.startsWith('#')) return match;
+            const trackingLink = `${protocol}://${host}/api/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
+            return `<a href="${trackingLink}"${attributes}>`;
+          }) + trackingPixel;
+        }
 
         await transporter.sendMail({
-          from: `"ZimaMail" <system@${settings.domain}>`,
+          from: `"ZimaMail" <${fromAddr}>`,
           to, subject, html: trackedBody
         });
         success = true;
-        usedRelayName = "Motor Interno (Sendmail)";
+        usedRelayName = "Motor Interno";
       }
 
       if (success) {
-        await addLog(`Job finalizado: ${to}`, "smtp");
-        res.json({ 
-          success: true, 
-          relay: usedRelayName,
-          mode: settings.delivery_mode,
-          warning: settings.delivery_mode === 'internal' ? "Nota: E-mail enviado via servidor local. Verifique SPF/DKIM." : null
-        });
+        res.json({ success: true, relay: usedRelayName });
       } else {
         throw new Error(`Todos os relays falharam. Último erro: ${lastError}`);
       }
     } catch (error: any) {
-      await addLog(`FALHA TOTAL na entrega para ${to}: ${error.message}`, "error");
+      await addLog(`FALHA na entrega para ${to}: ${error.message}`, "error");
       res.status(500).json({ success: false, message: error.message });
     }
   });

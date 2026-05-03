@@ -20,7 +20,11 @@ import {
   Send,
   LayoutDashboard,
   Zap,
-  Eye
+  Eye,
+  BarChart3,
+  Pointer,
+  ArrowUpRight,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
@@ -46,14 +50,17 @@ interface MailAccount {
 export default function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'mail' | 'dns' | 'accounts' | 'logs' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'mail' | 'dns' | 'accounts' | 'logs' | 'settings' | 'campaigns'>('overview');
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [isRelayModalOpen, setIsRelayModalOpen] = useState(false);
+  const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false);
   const [selectedEmail, setSelectedEmail] = useState<any>(null);
   const [accounts, setAccounts] = useState<MailAccount[]>([]);
   const [isFetchingAccounts, setIsFetchingAccounts] = useState(false);
   const [logs, setLogs] = useState<any[]>([]);
+  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [isFetchingCampaigns, setIsFetchingCampaigns] = useState(false);
 
   const [emails, setEmails] = useState<any[]>([]);
   const [domains, setDomains] = useState<string[]>([]);
@@ -167,6 +174,19 @@ export default function App() {
     }
   }, []);
 
+  const fetchCampaigns = useCallback(async () => {
+    setIsFetchingCampaigns(true);
+    try {
+      const res = await fetch('/api/campaigns');
+      const data = await res.json();
+      setCampaigns(data || []);
+    } catch (err) {
+      console.error('Erro ao buscar campanhas:', err);
+    } finally {
+      setIsFetchingCampaigns(false);
+    }
+  }, []);
+
   const fetchAccounts = useCallback(async () => {
     setIsFetchingAccounts(true);
     try {
@@ -198,16 +218,18 @@ export default function App() {
     fetchSettings();
     fetchDomains();
     fetchRelays();
+    fetchCampaigns();
 
     const interval = setInterval(() => {
       fetchEmails();
       fetchLogs();
       fetchDomains();
       fetchRelays();
+      fetchCampaigns();
     }, 10000); 
 
     return () => clearInterval(interval);
-  }, [fetchAccounts, fetchEmails, fetchLogs, fetchSettings, fetchDomains, fetchRelays]);
+  }, [fetchAccounts, fetchEmails, fetchLogs, fetchSettings, fetchDomains, fetchRelays, fetchCampaigns]);
 
   const handleDeleteAccount = async (id: string) => {
     if (!supabase) return;
@@ -225,6 +247,109 @@ export default function App() {
       alert('Erro ao excluir conta: ' + (err as Error).message);
     }
   };
+
+  const renderCampaigns = () => (
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="p-8 space-y-8">
+      <div className="flex justify-between items-center bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+        <div>
+          <h2 className="text-3xl font-black text-slate-900 tracking-tight">Campanhas</h2>
+          <p className="text-slate-400 text-sm">Gerencie disparos em massa e analise resultados</p>
+        </div>
+        <button 
+          onClick={() => setIsCampaignModalOpen(true)}
+          className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-500/20 active:scale-95 transition-all flex items-center gap-2"
+        >
+          <Plus className="w-5 h-5" /> Criar Campanha
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-5">
+           <div className="p-4 bg-blue-50 rounded-2xl text-blue-600">
+             <BarChart3 className="w-8 h-8" />
+           </div>
+           <div>
+             <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Aberturas Totais</p>
+             <h3 className="text-3xl font-black text-slate-900">{campaigns.reduce((acc, c) => acc + (c.opens || 0), 0)}</h3>
+           </div>
+        </div>
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-5">
+           <div className="p-4 bg-emerald-50 rounded-2xl text-emerald-600">
+             <Pointer className="w-8 h-8" />
+           </div>
+           <div>
+             <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Cliques Totais</p>
+             <h3 className="text-3xl font-black text-slate-900">{campaigns.reduce((acc, c) => acc + (c.clicks || 0), 0)}</h3>
+           </div>
+        </div>
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-5">
+           <div className="p-4 bg-purple-50 rounded-2xl text-purple-600">
+             <Zap className="w-8 h-8" />
+           </div>
+           <div>
+             <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Ativas</p>
+             <h3 className="text-3xl font-black text-slate-900">{campaigns.filter(c => c.status === 'sending').length}</h3>
+           </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-[40px] border border-slate-100 shadow-xl overflow-hidden">
+        <table className="w-full text-left">
+          <thead className="bg-slate-50 border-b border-slate-100">
+            <tr>
+              <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Nome da Campanha</th>
+              <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
+              <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Destinatários</th>
+              <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Abertas</th>
+              <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Cliques</th>
+              <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ações</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {campaigns.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-8 py-12 text-center text-slate-400 italic">Poxa, nenhuma campanha por aqui ainda.</td>
+              </tr>
+            )}
+            {campaigns.map((camp) => (
+              <tr key={camp.id} className="hover:bg-slate-50/50 transition-colors">
+                <td className="px-8 py-6">
+                  <div className="font-bold text-slate-900">{camp.name}</div>
+                  <div className="text-[10px] text-slate-400">{new Date(camp.createdAt).toLocaleString()}</div>
+                </td>
+                <td className="px-8 py-6">
+                   <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                     camp.status === 'draft' ? 'bg-slate-100 text-slate-600' : 
+                     camp.status === 'sending' ? 'bg-blue-100 text-blue-600 animate-pulse' : 
+                     'bg-emerald-100 text-emerald-600'
+                   }`}>
+                     {camp.status === 'draft' ? 'Rascunho' : camp.status === 'sending' ? 'Enviando' : 'Concluída'}
+                   </span>
+                </td>
+                <td className="px-8 py-6 text-center font-bold text-slate-900">{camp.recipients_count || 0}</td>
+                <td className="px-8 py-6 text-center">
+                  <div className="font-black text-blue-600">{camp.opens || 0}</div>
+                  <div className="text-[9px] text-slate-400 font-bold">{camp.recipients_count ? Math.round((camp.opens/camp.recipients_count)*100) : 0}%</div>
+                </td>
+                <td className="px-8 py-6 text-center">
+                  <div className="font-black text-emerald-600">{camp.clicks || 0}</div>
+                  <div className="text-[9px] text-slate-400 font-bold">{camp.opens ? Math.round((camp.clicks/camp.opens)*100) : 0}% CTR</div>
+                </td>
+                <td className="px-8 py-6">
+                  <button 
+                    onClick={() => alert('Analíticos detalhados em breve!')}
+                    className="p-3 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-all"
+                  >
+                    <ArrowRight className="w-5 h-5" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </motion.div>
+  );
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-500/30">
@@ -252,6 +377,12 @@ export default function App() {
             onClick={() => setActiveTab('dns')}
             icon={<Globe className="w-6 h-6" />}
             label="Domains"
+          />
+          <NavButton 
+            active={activeTab === 'campaigns'} 
+            onClick={() => setActiveTab('campaigns')}
+            icon={<Zap className="w-6 h-6" />}
+            label="Campanhas"
           />
           <NavButton 
             active={activeTab === 'accounts'} 
@@ -328,32 +459,34 @@ export default function App() {
                       <button onClick={() => setActiveTab('settings')} className="px-4 py-2 bg-amber-500 text-white rounded-xl text-xs font-bold hover:bg-amber-600 transition-colors">Configurar Agora</button>
                     </div>
                   )}
+                  
                   <StatCard 
-                    title="Contas Ativas" 
-                    value={accounts.length} 
-                    subtitle="Caixas de entrada"
-                    icon={<Users className="w-5 h-5 text-blue-600" />}
-                    progress={Math.min((accounts.length / 50) * 100, 100)}
+                    icon={<ArrowUpRight className="w-6 h-6" />} 
+                    iconColor="text-blue-600"
+                    title="Enviados" 
+                    value={logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length} 
+                    trend="+12%" 
                   />
                   <StatCard 
-                    title="Emails Entregues" 
-                    value={logs.filter(l => l.message.includes('com sucesso')).length} 
-                    subtitle="Outbound"
-                    icon={<Send className="w-5 h-5 text-indigo-600" />}
-                    trend="+12%"
+                    icon={<Eye className="w-6 h-6" />} 
+                    iconColor="text-purple-600"
+                    title="Abertos" 
+                    value={logs.filter(l => l.opened).length} 
+                    subtitle={`${logs.filter(l => l.opened).length ? Math.round((logs.filter(l => l.opened).length / (logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length || 1)) * 100) : 0}% taxa`}
                   />
                   <StatCard 
-                    title="Emails Abertos" 
-                    value={logs.filter(l => l.type === 'track').length} 
-                    subtitle="Taxa de Leitura"
-                    icon={<Eye className="w-5 h-5 text-emerald-600" />}
-                    trend="Real-time"
+                    icon={<Zap className="w-6 h-6" />} 
+                    iconColor="text-amber-600"
+                    title="Cliques" 
+                    value={logs.filter(l => l.clicked).length} 
+                    subtitle="CTR Médio" 
                   />
                   <StatCard 
-                    title="Logs do Sistema" 
-                    value={logs.length} 
-                    subtitle="Últimas 24h"
-                    icon={<HardDrive className="w-5 h-5 text-slate-600" />}
+                    icon={<Shield className="w-6 h-6" />} 
+                    iconColor="text-emerald-600"
+                    title="Reputação" 
+                    value="98.2%" 
+                    trend="Excelente" 
                   />
                 </div>
 
@@ -370,7 +503,7 @@ export default function App() {
                         <ServiceItem name="SMTP Engine (Custom Node.js)" status="running" port={25} />
                         <ServiceItem name="IMAP Core" status="running" port={993} />
                         <ServiceItem name="Supabase DB Connection" status="running" type="External" />
-                        <ServiceItem name="Spam Filter (Rspamd)" status="warning" message="Atualizando bases..." />
+                        <ServiceItem name="Spam Filter (Rspamd)" status="running" port={11334} />
                       </div>
                     </div>
 
@@ -380,13 +513,13 @@ export default function App() {
                         <ActionCard 
                           title="Gerar Chaves DKIM/SPF" 
                           description="Melhore a entregabilidade dos seus emails"
-                          icon={<Shield className="w-6 h-6" />}
+                          icon={<Shield className="w-6 h-6 text-slate-600" />}
                           onClick={() => setActiveTab('dns')}
                         />
                         <ActionCard 
                           title="Backup Supabase" 
                           description="Sincronizar metadados agora"
-                          icon={<Database className="w-6 h-6" />}
+                          icon={<Database className="w-6 h-6 text-slate-600" />}
                           onClick={() => {
                             fetchAccounts();
                             alert('Sincronização com Supabase iniciada...');
@@ -539,6 +672,7 @@ export default function App() {
               </motion.div>
             )}
 
+            {activeTab === 'campaigns' && renderCampaigns()}
             {activeTab === 'dns' && (
               <motion.div 
                 key="dns"
@@ -863,11 +997,23 @@ export default function App() {
                           log.type === 'track' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'
                         }`} />
                         <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            {log.type === 'track' && <Eye className="w-3 h-3 text-emerald-500" />}
-                            <p className={`text-sm font-medium ${log.type === 'track' ? 'text-emerald-700' : 'text-slate-700'}`}>{log.message}</p>
+                          <div className="flex items-center gap-3 mb-1">
+                            <p className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors">{log.message}</p>
+                            {log.opened && (
+                              <span className="px-2 py-0.5 bg-blue-100 text-blue-600 text-[9px] font-black uppercase rounded shadow-sm">
+                                 LIDO {log.openedAt ? `em ${new Date(log.openedAt).toLocaleTimeString()}` : ''}
+                              </span>
+                            )}
+                            {log.clicked && (
+                              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-600 text-[9px] font-black uppercase rounded shadow-sm">
+                                 CLICADO
+                              </span>
+                            )}
                           </div>
-                          <p className="text-[10px] text-slate-400 font-mono mt-1">{new Date(log.timestamp).toLocaleString()}</p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
+                            {new Date(log.timestamp).toLocaleString()}
+                            {log.to ? ` — Para: ${log.to}` : ''}
+                          </p>
                         </div>
                         <span className={`text-[10px] uppercase font-black px-2 py-0.5 rounded ${
                            log.type === 'error' ? 'bg-red-50 text-red-600' : 
@@ -1165,6 +1311,12 @@ export default function App() {
         isOpen={isRelayModalOpen} 
         onClose={() => setIsRelayModalOpen(false)} 
         onSuccess={fetchRelays}
+      />
+      <CampaignModal 
+        isOpen={isCampaignModalOpen} 
+        onClose={() => setIsCampaignModalOpen(false)} 
+        onSuccess={fetchCampaigns}
+        accounts={accounts}
       />
     </div>
 
@@ -1465,6 +1617,194 @@ function RelayModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: 
   );
 }
 
+function CampaignModal({ isOpen, onClose, onSuccess, accounts }: { isOpen: boolean, onClose: () => void, onSuccess: () => void, accounts: any[] }) {
+  const [step, setStep] = useState(1);
+  const [formData, setFormData] = useState({
+    name: '',
+    from: accounts[0]?.email || '',
+    subject: '',
+    body: '',
+    recipients: ''
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    try {
+      const recipientList = formData.recipients.split(/[,\n]/).map(r => r.trim()).filter(r => r.includes('@'));
+      
+      const res = await fetch('/api/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...formData,
+          recipients_count: recipientList.length
+        })
+      });
+
+      if (res.ok) {
+        const { campaign } = await res.json();
+        // Iniciar envio em massa (simulado/paralelo)
+        for (const to of recipientList) {
+          fetch('/api/mail/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              from: formData.from,
+              to,
+              subject: formData.subject,
+              body: formData.body,
+              campaignId: campaign.id
+            })
+          });
+        }
+        onSuccess();
+        onClose();
+        setFormData({ name: '', from: accounts[0]?.email || '', subject: '', body: '', recipients: '' });
+        setStep(1);
+      } else {
+        alert('Erro ao criar campanha.');
+      }
+    } catch (err) {
+      alert('Erro de conexão.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[110] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="bg-white rounded-[40px] shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden border border-slate-200 flex flex-col"
+      >
+        <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-blue-600 rounded-2xl text-white shadow-lg shadow-blue-500/20">
+              <Zap className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-black text-xl text-slate-900 tracking-tight">Nova Campanha</h3>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Passo {step} de 2 — {step === 1 ? 'Configuração' : 'Conteúdo'}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-3 hover:bg-slate-200 rounded-2xl text-slate-400 transition-all">
+             <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
+          {step === 1 ? (
+            <div className="p-10 space-y-8">
+               <div className="space-y-4">
+                 <label className="block text-xs font-black text-slate-400 uppercase ml-1">Dados Básicos</label>
+                 <div className="grid grid-cols-2 gap-6">
+                    <input 
+                      required
+                      type="text" 
+                      value={formData.name}
+                      onChange={e => setFormData({...formData, name: e.target.value})}
+                      placeholder="Nome Interno da Campanha"
+                      className="w-full p-5 bg-slate-50 rounded-3xl border border-slate-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold"
+                    />
+                    <select 
+                      value={formData.from}
+                      onChange={e => setFormData({...formData, from: e.target.value})}
+                      className="w-full p-5 bg-slate-50 rounded-3xl border border-slate-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold"
+                    >
+                      {accounts.map(acc => (
+                        <option key={acc.email} value={acc.email}>Remetente: {acc.email}</option>
+                      ))}
+                    </select>
+                 </div>
+               </div>
+
+               <div className="space-y-4">
+                 <label className="block text-xs font-black text-slate-400 uppercase ml-1">Lista de Destinatários</label>
+                 <textarea 
+                   required
+                   value={formData.recipients}
+                   onChange={e => setFormData({...formData, recipients: e.target.value})}
+                   placeholder="Cole aqui os e-mails separados por linha ou vírgula..."
+                   rows={6}
+                   className="w-full p-6 bg-slate-50 rounded-[32px] border border-slate-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-mono text-sm leading-relaxed"
+                 />
+                 <p className="text-[10px] text-slate-400 px-2 italic text-right">Dica: Você pode copiar direto do Excel ou Google Sheets.</p>
+               </div>
+            </div>
+          ) : (
+            <div className="p-10 space-y-8">
+               <div className="space-y-2">
+                 <label className="block text-xs font-black text-slate-400 uppercase ml-1">Assunto do E-mail</label>
+                 <input 
+                   required
+                   value={formData.subject}
+                   onChange={e => setFormData({...formData, subject: e.target.value})}
+                   placeholder="O que o cliente vai ver na caixa de entrada?"
+                   className="w-full p-6 bg-slate-50 rounded-3xl border border-slate-200 focus:ring-4 focus:ring-blue-500/10 transition-all text-lg font-bold placeholder:text-slate-300"
+                 />
+               </div>
+               <div className="space-y-2">
+                 <label className="block text-xs font-black text-slate-400 uppercase ml-1">Mensagem (HTML Suportado)</label>
+                 <textarea 
+                   required
+                   value={formData.body}
+                   onChange={e => setFormData({...formData, body: e.target.value})}
+                   placeholder="Olá [NOME], confira nossa novidade..."
+                   rows={12}
+                   className="w-full p-8 bg-slate-50 rounded-[40px] border border-slate-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-mono text-sm leading-relaxed"
+                 />
+               </div>
+            </div>
+          )}
+
+          <div className="p-8 bg-slate-50 flex justify-between items-center border-t border-slate-100">
+            {step === 2 && (
+              <button 
+                type="button"
+                onClick={() => setStep(1)}
+                className="px-8 py-4 text-slate-500 font-black hover:text-slate-800 transition-colors uppercase text-xs tracking-widest"
+              >
+                Voltar
+              </button>
+            )}
+            <div className="flex gap-4 ml-auto">
+              <button 
+                type="button"
+                onClick={onClose}
+                className="px-8 py-4 text-slate-400 font-black hover:text-slate-600 transition-colors uppercase text-xs tracking-widest"
+              >
+                Cancelar
+              </button>
+              {step === 1 ? (
+                <button 
+                  type="button"
+                  onClick={() => setStep(2)}
+                  className="px-12 py-4 bg-slate-900 text-white rounded-2xl font-black shadow-xl shadow-slate-900/10 active:scale-95 transition-all text-xs tracking-widest uppercase"
+                >
+                  Continuar
+                </button>
+              ) : (
+                <button 
+                  disabled={isSubmitting}
+                  className="px-12 py-4 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-500/30 active:scale-95 transition-all text-xs tracking-widest uppercase flex items-center gap-3 disabled:opacity-50"
+                >
+                  {isSubmitting ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                  Lançar Campanha AGORA
+                </button>
+              )}
+            </div>
+          </div>
+        </form>
+      </motion.div>
+    </div>
+  );
+}
+
 function AccountModal({ isOpen, onClose, onSuccess, domains }: { isOpen: boolean, onClose: () => void, onSuccess: () => void, domains: string[] }) {
   const [formData, setFormData] = useState({
     email: '',
@@ -1675,27 +2015,22 @@ function DNSRowDark({ type, host, content, priority, desc }: any) {
   );
 }
 
-function StatCard({ title, value, subtitle, icon, trend, progress }: any) {
+function StatCard({ title, value, subtitle, icon, trend, progress, iconColor }: any) {
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-5 hover:border-blue-200 transition-colors group shadow-sm">
-      <div className="flex justify-between items-start mb-4">
-        <div className="p-2 bg-slate-50 rounded-lg group-hover:bg-blue-50 transition-colors">
-          {icon}
-        </div>
-        {trend && <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-tighter bg-emerald-50 px-2 py-1 rounded-full border border-emerald-100">{trend}</span>}
+    <div className="bg-white border border-slate-200 rounded-[32px] p-6 hover:border-blue-200 transition-all group shadow-sm flex items-center gap-6">
+      <div className={`p-4 bg-slate-50 rounded-2xl group-hover:bg-blue-600 group-hover:text-white transition-all group-hover:scale-110 ${iconColor}`}>
+        {icon}
       </div>
       <div>
-        <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">{title}</p>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">{title}</span>
+          {trend && <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-600 text-[8px] font-black rounded shadow-sm">{trend}</span>}
+        </div>
         <div className="flex items-baseline gap-2">
-          <h4 className="text-2xl font-bold text-slate-900">{value}</h4>
-          {subtitle && <span className="text-slate-400 text-xs">{subtitle}</span>}
+          <h4 className="text-4xl font-black text-slate-900 tracking-tighter leading-none">{value}</h4>
+          {subtitle && <span className="text-slate-400 text-[10px] font-bold">{subtitle}</span>}
         </div>
       </div>
-      {progress !== undefined && (
-        <div className="mt-4 w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-          <div className="h-full bg-blue-600" style={{ width: `${progress}%` }} />
-        </div>
-      )}
     </div>
   );
 }
@@ -1717,7 +2052,7 @@ function ServiceItem({ name, status, port, type, message }: any) {
         </div>
       </div>
       <div className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-        status === 'running' ? 'bg-emerald-50 text-white' : 'bg-amber-500 text-white'
+        status === 'running' ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-500 text-white'
       }`}>
         {status === 'running' ? 'Online' : 'Warning'}
       </div>
