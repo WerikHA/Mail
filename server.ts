@@ -513,7 +513,7 @@ async function startServer() {
         // Tentar cada relay até um funcionar (Failover)
         for (let i = 0; i < availableRelays.length; i++) {
           const relay = availableRelays[i];
-          const sanitizedHost = (relay.host || "").trim().toLowerCase();
+          const sanitizedHost = (relay.host || "").replace(/[^a-zA-Z0-9.-]/g, "").toLowerCase();
           const sanitizedUser = (relay.user || "").trim();
           const sanitizedPass = (relay.pass || "").trim();
           
@@ -525,7 +525,13 @@ async function startServer() {
               const lookup = await dns.lookup(sanitizedHost, { family: 4 });
               await addLog(`DNS Resolvido: ${sanitizedHost} -> ${lookup.address}`, "info");
             } catch (dnsErr: any) {
-              await addLog(`DNS FALHA Crítica para ${sanitizedHost}: ${dnsErr.message}. Verifique se há espaços no host.`, "error");
+              await addLog(`DNS FALHA Crítica para ${sanitizedHost}: ${dnsErr.message}. Tentando via resolve4...`, "error");
+              try {
+                const addresses = await dns.resolve4(sanitizedHost);
+                await addLog(`DNS resolve4 Funcionou: ${addresses[0]}`, "info");
+              } catch (resErr) {
+                await addLog(`Todas as tentativas de DNS falharam para ${sanitizedHost}. Verifique a internet do seu servidor/container.`, "error");
+              }
             }
 
             const transporter = nodemailer.createTransport({

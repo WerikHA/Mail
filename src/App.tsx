@@ -819,35 +819,50 @@ export default function App() {
                     <div className="p-4 bg-white/5 rounded-2xl border border-white/10 mb-6">
                        <p className="text-[10px] font-black text-blue-400 uppercase mb-3">Registros de Base</p>
                        <div className="space-y-3">
-                         <DNSRowDark type="MX" host="@" content={`mail.${domains[0] || 'seu-dominio.com'}`} desc="Recebimento de e-mail" />
-                         <DNSRowDark type="A" host="mail" content="[IP_DO_ZIMAOS]" desc="IP do servidor" />
+                         <DNSRowDark type="A" host="@" content="45.167.187.80" desc="Domínio Principal" />
+                         <DNSRowDark type="CNAME" host="mail" content="amplifamarketing.com.br" desc="Acesso Webmail/SMTP" />
+                         <DNSRowDark type="MX" host="@" content="10 mail.amplifamarketing.com.br" desc="Recebimento (Prioridade 10)" />
                        </div>
                     </div>
 
                     <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
                        <div className="flex justify-between items-center mb-3">
-                          <p className="text-[10px] font-black text-emerald-400 uppercase">SPF Combinado (Obrigatório)</p>
-                          <span className="text-[9px] text-slate-500 bg-white/5 px-2 py-0.5 rounded">Multi-Relay Ativo</span>
+                          <p className="text-[10px] font-black text-emerald-400 uppercase">Segurança e Entregabilidade (SPF/DKIM/DMARC)</p>
+                          <span className="text-[9px] text-slate-500 bg-white/5 px-2 py-0.5 rounded">Configuração Cloudflare Ativa</span>
                        </div>
-                       <DNSRowDark 
-                         type="TXT" 
-                         host="@" 
-                         content={`v=spf1 ip4:[IP_SERVER] ${relays.map((r:any) => `include:${r.host.split('.').slice(-2).join('.')}`).join(' ')} ~all`} 
-                         desc="Autorização múltipla" 
-                       />
+                       <div className="space-y-3">
+                         <DNSRowDark 
+                           type="TXT" 
+                           host="@" 
+                           content="v=spf1 ip4:45.167.187.80 include:brevo.com ~all" 
+                           desc="SPF: Autorização de Envio" 
+                         />
+                         <DNSRowDark 
+                           type="TXT" 
+                           host="brevo._domainkey" 
+                           content="v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADC..." 
+                           desc="DKIM: Assinatura Brevo" 
+                         />
+                         <DNSRowDark 
+                           type="TXT" 
+                           host="_dmarc" 
+                           content="v=DMARC1; p=quarantine;" 
+                           desc="DMARC: Política de Segurança" 
+                         />
+                       </div>
                     </div>
 
-                    {relays.length > 0 && (
+                    {relays.length > 1 && (
                       <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
-                         <p className="text-[10px] font-black text-amber-400 uppercase mb-3">Chaves DKIM Adicionais</p>
+                         <p className="text-[10px] font-black text-amber-400 uppercase mb-3">Chaves DKIM Adicionais (Outros Relays)</p>
                          <div className="space-y-3">
-                            {relays.map((r: any) => (
+                            {relays.filter((r:any) => !r.host.includes('brevo')).map((r: any) => (
                               <DNSRowDark 
                                 key={r.id}
                                 type="TXT" 
                                 host={`${r.name.toLowerCase().replace(/\s/g, '')}._domainkey`} 
                                 content="v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADC..." 
-                                desc={`Assinatuta ${r.name}`} 
+                                desc={`Assinatura ${r.name}`} 
                               />
                             ))}
                          </div>
