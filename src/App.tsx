@@ -1,5 +1,14 @@
 import { useState, useEffect, useCallback, FormEvent } from 'react';
 import { 
+  LineChart, 
+  Line, 
+  XAxis, 
+  YAxis, 
+  Tooltip, 
+  ResponsiveContainer,
+  CartesianGrid
+} from 'recharts';
+import { 
   Mail, 
   Shield, 
   Server, 
@@ -24,7 +33,15 @@ import {
   BarChart3,
   Pointer,
   ArrowUpRight,
-  X
+  X,
+  Edit2,
+  ArrowUp,
+  ArrowDown,
+  LogOut,
+  Lock,
+  MousePointer2,
+  Target,
+  Copy
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
@@ -48,10 +65,12 @@ interface MailAccount {
 }
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'mail' | 'dns' | 'accounts' | 'logs' | 'settings' | 'campaigns'>('overview');
   const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [editAccount, setEditAccount] = useState<any>(null);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [isRelayModalOpen, setIsRelayModalOpen] = useState(false);
   const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false);
@@ -61,10 +80,14 @@ export default function App() {
   const [logs, setLogs] = useState<any[]>([]);
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [isFetchingCampaigns, setIsFetchingCampaigns] = useState(false);
+  const [selectedCampaign, setSelectedCampaign] = useState<any>(null);
 
   const [emails, setEmails] = useState<any[]>([]);
   const [domains, setDomains] = useState<string[]>([]);
   const [relays, setRelays] = useState<any[]>([]);
+  const [logFilterStatus, setLogFilterStatus] = useState<'all' | 'error' | 'success'>('all');
+  const [logFilterCampaign, setLogFilterCampaign] = useState<string>('all');
+  const [editingRelay, setEditingRelay] = useState<any>(null);
   const [settings, setSettings] = useState<any>({
     smtp_host: '',
     smtp_port: 587,
@@ -122,6 +145,25 @@ export default function App() {
       console.error('Erro ao buscar relays:', err);
     }
   }, []);
+
+  const moveRelay = async (index: number, direction: 'up' | 'down') => {
+    const newRelays = [...relays];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= newRelays.length) return;
+    
+    [newRelays[index], newRelays[targetIndex]] = [newRelays[targetIndex], newRelays[index]];
+    setRelays(newRelays);
+    
+    try {
+      await fetch('/api/relays/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ relays: newRelays })
+      });
+    } catch (err) {
+      console.error('Erro ao reordenar relays:', err);
+    }
+  };
 
   const addRelay = async (relay: any) => {
     try {
@@ -204,6 +246,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const savedUser = localStorage.getItem('zima_user');
+    if (savedUser) {
+      setCurrentUser(JSON.parse(savedUser));
+    }
+
     fetch('/api/stats')
       .then(res => res.json())
       .then(data => {
@@ -263,14 +310,14 @@ export default function App() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-5">
            <div className="p-4 bg-blue-50 rounded-2xl text-blue-600">
              <BarChart3 className="w-8 h-8" />
            </div>
            <div>
-             <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Aberturas Totais</p>
-             <h3 className="text-3xl font-black text-slate-900">{campaigns.reduce((acc, c) => acc + (c.opens || 0), 0)}</h3>
+             <p className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">Aberturas Totais</p>
+             <h3 className="text-2xl font-black text-slate-900">{campaigns.reduce((acc, c) => acc + (c.stats?.opens || c.opens || 0), 0)}</h3>
            </div>
         </div>
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-5">
@@ -278,17 +325,30 @@ export default function App() {
              <Pointer className="w-8 h-8" />
            </div>
            <div>
-             <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Cliques Totais</p>
-             <h3 className="text-3xl font-black text-slate-900">{campaigns.reduce((acc, c) => acc + (c.clicks || 0), 0)}</h3>
+             <p className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">Cliques Totais</p>
+             <h3 className="text-2xl font-black text-slate-900">{campaigns.reduce((acc, c) => acc + (c.stats?.clicks || c.clicks || 0), 0)}</h3>
            </div>
         </div>
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-5">
            <div className="p-4 bg-purple-50 rounded-2xl text-purple-600">
-             <Zap className="w-8 h-8" />
+             <MousePointer2 className="w-8 h-8" />
            </div>
            <div>
-             <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Ativas</p>
-             <h3 className="text-3xl font-black text-slate-900">{campaigns.filter(c => c.status === 'sending').length}</h3>
+             <p className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">CTR Média</p>
+             <h3 className="text-2xl font-black text-slate-900">
+                {campaigns.length > 0 ? (campaigns.reduce((acc, c) => acc + (c.stats?.sent > 0 ? (c.stats.clicks / c.stats.sent) : 0), 0) / campaigns.length * 100).toFixed(1) : 0}%
+             </h3>
+           </div>
+        </div>
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-5">
+           <div className="p-4 bg-amber-50 rounded-2xl text-amber-600">
+             <Target className="w-8 h-8" />
+           </div>
+           <div>
+             <p className="text-xs font-black text-slate-400 uppercase tracking-widest leading-tight">Conversão</p>
+             <h3 className="text-2xl font-black text-slate-900">
+                {campaigns.length > 0 ? (campaigns.reduce((acc, c) => acc + (c.stats?.sent > 0 ? (c.stats.opens / c.stats.sent) : 0), 0) / campaigns.length * 100).toFixed(1) : 0}%
+             </h3>
            </div>
         </div>
       </div>
@@ -302,6 +362,7 @@ export default function App() {
               <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Destinatários</th>
               <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Abertas</th>
               <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Cliques</th>
+              <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">CTR</th>
               <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ações</th>
             </tr>
           </thead>
@@ -311,45 +372,96 @@ export default function App() {
                 <td colSpan={6} className="px-8 py-12 text-center text-slate-400 italic">Poxa, nenhuma campanha por aqui ainda.</td>
               </tr>
             )}
-            {campaigns.map((camp) => (
-              <tr key={camp.id} className="hover:bg-slate-50/50 transition-colors">
-                <td className="px-8 py-6">
-                  <div className="font-bold text-slate-900">{camp.name}</div>
-                  <div className="text-[10px] text-slate-400">{new Date(camp.createdAt).toLocaleString()}</div>
-                </td>
-                <td className="px-8 py-6">
-                   <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${
-                     camp.status === 'draft' ? 'bg-slate-100 text-slate-600' : 
-                     camp.status === 'sending' ? 'bg-blue-100 text-blue-600 animate-pulse' : 
-                     'bg-emerald-100 text-emerald-600'
-                   }`}>
-                     {camp.status === 'draft' ? 'Rascunho' : camp.status === 'sending' ? 'Enviando' : 'Concluída'}
-                   </span>
-                </td>
-                <td className="px-8 py-6 text-center font-bold text-slate-900">{camp.recipients_count || 0}</td>
-                <td className="px-8 py-6 text-center">
-                  <div className="font-black text-blue-600">{camp.opens || 0}</div>
-                  <div className="text-[9px] text-slate-400 font-bold">{camp.recipients_count ? Math.round((camp.opens/camp.recipients_count)*100) : 0}%</div>
-                </td>
-                <td className="px-8 py-6 text-center">
-                  <div className="font-black text-emerald-600">{camp.clicks || 0}</div>
-                  <div className="text-[9px] text-slate-400 font-bold">{camp.opens ? Math.round((camp.clicks/camp.opens)*100) : 0}% CTR</div>
-                </td>
-                <td className="px-8 py-6">
-                  <button 
-                    onClick={() => alert('Analíticos detalhados em breve!')}
-                    className="p-3 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-all"
-                  >
-                    <ArrowRight className="w-5 h-5" />
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {campaigns.map((camp) => {
+              const stats = camp.stats || { total: camp.recipients_count || 0, sent: 0, failed: 0, opens: camp.opens || 0, clicks: camp.clicks || 0 };
+              const progress = stats.total > 0 ? Math.round(((stats.sent + stats.failed) / stats.total) * 100) : 0;
+              
+              return (
+                <tr key={camp.id} className="hover:bg-slate-50/50 transition-colors group">
+                  <td className="px-8 py-6">
+                    <div className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors">{camp.name}</div>
+                    <div className="text-[10px] text-slate-400 flex items-center gap-2 mt-1">
+                      <span className="font-mono">{new Date(camp.createdAt).toLocaleDateString()}</span>
+                      <span className="w-1 h-1 bg-slate-300 rounded-full" />
+                      <span className="font-mono">{new Date(camp.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                  </td>
+                  <td className="px-8 py-6">
+                    <div className="flex flex-col gap-2 min-w-[120px]">
+                      <span className={`inline-flex px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest w-fit ${
+                        camp.status === 'draft' ? 'bg-slate-100 text-slate-600' : 
+                        camp.status === 'sending' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 
+                        'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20'
+                      }`}>
+                        {camp.status === 'draft' ? 'Rascunho' : camp.status === 'sending' ? 'Enviando' : 'CONCLUÍDA'}
+                      </span>
+                      {camp.status === 'sending' && (
+                        <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
+                          <motion.div 
+                            initial={{ width: 0 }}
+                            animate={{ width: `${progress}%` }}
+                            className="bg-blue-600 h-full"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-8 py-6 text-center">
+                    <div className="font-black text-slate-900 text-sm">{stats.total}</div>
+                    <div className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">TOTAL</div>
+                  </td>
+                  <td className="px-8 py-6 text-center">
+                    <div className="font-black text-blue-600 text-sm">{stats.opens}</div>
+                    <div className="text-[9px] text-slate-400 font-bold">{stats.sent ? Math.round((stats.opens / stats.sent) * 100) : 0}%</div>
+                  </td>
+                  <td className="px-8 py-6 text-center">
+                    <div className="font-black text-emerald-600 text-sm">{stats.clicks}</div>
+                    <div className="text-[9px] text-slate-400 font-bold">{stats.opens ? Math.round((stats.clicks / stats.opens) * 100) : 0}% CTOR</div>
+                  </td>
+                  <td className="px-8 py-6 text-center">
+                    <div className="font-black text-purple-600 text-sm">
+                       {stats.sent > 0 ? ((stats.clicks / stats.sent) * 100).toFixed(1) : 0}%
+                    </div>
+                    <div className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">CONVERSÃO</div>
+                  </td>
+                  <td className="px-8 py-6">
+                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all translate-x-2 group-hover:translate-x-0">
+                      <button 
+                        onClick={() => setSelectedCampaign(camp)}
+                        className="p-3 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-all"
+                        title="Detalhes"
+                      >
+                        <RefreshCw className="w-5 h-5" />
+                      </button>
+                      <button 
+                         onClick={async () => {
+                           if(confirm('Deseja apagar esta campanha? Todos os logs relacionados serão mantidos por segurança.')) {
+                              await fetch(`/api/campaigns/${camp.id}`, { method: 'DELETE' });
+                              fetchCampaigns();
+                           }
+                         }}
+                         className="p-3 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-2xl transition-all"
+                         title="Excluir"
+                       >
+                         <Trash2 className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
     </motion.div>
   );
+
+  if (!currentUser) {
+    return <Login onLogin={(user) => { 
+      setCurrentUser(user);
+      localStorage.setItem('zima_user', JSON.stringify(user));
+    }} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-500/30">
@@ -404,9 +516,19 @@ export default function App() {
           />
         </div>
 
-        <div className="mt-auto">
+        <div className="mt-auto flex flex-col items-center gap-4 mb-4">
+          <button 
+            onClick={() => {
+              localStorage.removeItem('zima_user');
+              setCurrentUser(null);
+            }}
+            className="p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all"
+            title="Sair"
+          >
+            <LogOut className="w-6 h-6" />
+          </button>
           <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xs font-bold text-slate-500">
-            ZM
+            {currentUser.name?.[0] || 'Z'}
           </div>
         </div>
       </nav>
@@ -472,155 +594,324 @@ export default function App() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="space-y-8"
+                className="space-y-8 pb-12 max-w-[1600px] mx-auto"
               >
-                {/* Stats Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {settings.delivery_mode === 'external' && relays.length === 0 && !settings.smtp_host && (
-                    <div className="lg:col-span-4 bg-amber-50 border border-amber-200 p-5 rounded-3xl flex items-center gap-5 shadow-sm">
-                      <div className="p-3 bg-white rounded-2xl shadow-sm">
-                        <AlertCircle className="w-6 h-6 text-amber-500" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-black text-slate-900">Relay SMTP Externo não detectado!</p>
-                        <p className="text-xs text-slate-500 mt-0.5">Sem um relay (como SendGrid), seus emails para Gmail/Outlook falharão. Configure em <button onClick={() => setActiveTab('settings')} className="text-blue-600 font-bold hover:underline">Configurações</button>.</p>
-                      </div>
-                      <button onClick={() => setActiveTab('settings')} className="px-4 py-2 bg-amber-500 text-white rounded-xl text-xs font-bold hover:bg-amber-600 transition-colors">Configurar Agora</button>
+                {/* Alert Section */}
+                {settings.delivery_mode === 'external' && relays.length === 0 && !settings.smtp_host && (
+                  <div className="bg-amber-50 border border-amber-200 p-6 rounded-[32px] flex flex-col sm:flex-row items-center gap-6 shadow-sm">
+                    <div className="p-4 bg-white rounded-2xl shadow-sm shrink-0">
+                      <AlertCircle className="w-8 h-8 text-amber-500 animate-bounce" />
                     </div>
-                  )}
-                  
-                  <StatCard 
-                    icon={<ArrowUpRight className="w-6 h-6" />} 
-                    iconColor="text-blue-600"
-                    title="Enviados" 
-                    value={logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length} 
-                    trend="+12%" 
-                  />
-                  <StatCard 
-                    icon={<Eye className="w-6 h-6" />} 
-                    iconColor="text-purple-600"
-                    title="Abertos" 
-                    value={logs.filter(l => l.opened).length} 
-                    subtitle={`${logs.filter(l => l.opened).length ? Math.round((logs.filter(l => l.opened).length / (logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length || 1)) * 100) : 0}% taxa`}
-                  />
-                  <StatCard 
-                    icon={<Zap className="w-6 h-6" />} 
-                    iconColor="text-amber-600"
-                    title="Cliques" 
-                    value={logs.filter(l => l.clicked).length} 
-                    subtitle="CTR Médio" 
-                  />
-                  <StatCard 
-                    icon={<Shield className="w-6 h-6" />} 
-                    iconColor="text-emerald-600"
-                    title="Reputação" 
-                    value="98.2%" 
-                    trend="Excelente" 
-                  />
-                </div>
-
-                {/* Main Dashboard Section */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  <div className="lg:col-span-2 space-y-6">
-                    <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                      <div className="flex justify-between items-center mb-6">
-                        <h3 className="font-semibold text-lg text-slate-900">Status dos Serviços</h3>
-                        <span className="text-xs text-slate-400 uppercase tracking-widest font-bold">Monitoramento Tempo Real</span>
-                      </div>
-                      
-                      <div className="space-y-4">
-                        <ServiceItem name="SMTP Engine (Custom Node.js)" status="running" port={25} />
-                        <ServiceItem name="IMAP Core" status="running" port={993} />
-                        <ServiceItem name="Supabase DB Connection" status="running" type="External" />
-                        <ServiceItem name="Spam Filter (Rspamd)" status="running" port={11334} />
-                      </div>
+                    <div className="flex-1 text-center sm:text-left">
+                      <p className="text-sm font-black text-slate-900 uppercase tracking-widest mb-1">Porta de Saída Não Configurada</p>
+                      <p className="text-xs text-slate-500 font-bold leading-relaxed">Você está em modo 'Relay Externo' mas não conectou nenhum servidor (SendGrid, Brevo, AWS SES). Suas campanhas ficarão retidas na fila.</p>
                     </div>
+                    <button onClick={() => setActiveTab('settings')} className="w-full sm:w-auto px-6 py-3 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-lg active:scale-95">Configurar Gateway</button>
+                  </div>
+                )}
 
-                    <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                      <h3 className="font-semibold text-lg text-slate-900 mb-6">Ações Rápidas</h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <ActionCard 
-                          title="Gerar Chaves DKIM/SPF" 
-                          description="Melhore a entregabilidade dos seus emails"
-                          icon={<Shield className="w-6 h-6 text-slate-600" />}
-                          onClick={() => setActiveTab('dns')}
-                        />
-                        <ActionCard 
-                          title="Backup Supabase" 
-                          description="Sincronizar metadados agora"
-                          icon={<Database className="w-6 h-6 text-slate-600" />}
-                          onClick={() => {
-                            fetchAccounts();
-                            alert('Sincronização com Supabase iniciada...');
-                          }}
-                        />
+
+                {/* Main Stats Layout */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                  {/* Trend Chart (Col 1-8) */}
+                  <div className="lg:col-span-8 bg-white border border-slate-200 rounded-[32px] p-6 shadow-sm">
+                    <h3 className="text-xl font-black text-slate-900 tracking-tight mb-6">Tendência</h3>
+                    <div className="h-[250px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={[
+                          { hour: '00h', volume: 50 },
+                          { hour: '06h', volume: 80 },
+                          { hour: '12h', volume: 150 },
+                          { hour: '18h', volume: 120 },
+                          { hour: '23h', volume: 60 },
+                        ]}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                          <XAxis dataKey="hour" stroke="#94A3B8" fontSize={12} tickLine={false} axisLine={false} />
+                          <YAxis stroke="#94A3B8" fontSize={12} tickLine={false} axisLine={false} />
+                          <Tooltip />
+                          <Line type="monotone" dataKey="volume" stroke="#2563EB" strokeWidth={3} dot={{ fill: '#2563EB', r: 4 }} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Hero Stat: Total Volume (Col 9-12) */}
+                  <div className="lg:col-span-4 bg-blue-600 rounded-[32px] p-8 text-white relative overflow-hidden shadow-xl shadow-blue-500/20 group h-full min-h-[300px] flex flex-col justify-between">
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-16 -mt-16 group-hover:scale-110 transition-transform duration-1000" />
+                    <div className="relative z-10 flex justify-between items-start">
+                      <div className="p-3 bg-white/10 backdrop-blur-md rounded-xl border border-white/20">
+                        <ArrowUpRight className="w-6 h-6 text-white" />
+                      </div>
+                      <span className="text-[10px] font-black uppercase tracking-[0.2em] bg-white/20 px-4 py-1.5 rounded-full border border-white/20 backdrop-blur-sm">Monitor</span>
+                    </div>
+                    <div className="relative z-10 mt-6">
+                      <p className="text-blue-100 text-xs font-black uppercase tracking-[0.1em] opacity-80 mb-1">Total</p>
+                      <h2 className="text-4xl font-black tracking-tighter leading-none mb-4">
+                        {logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length.toLocaleString()}
+                      </h2>
+                      <div className="flex items-center gap-1.5 bg-emerald-400 text-emerald-950 px-3 py-1.5 rounded-lg font-black text-[10px] w-fit">
+                        <ArrowUp className="w-3 h-3" /> 14.8%
                       </div>
                     </div>
                   </div>
 
-                  <div className="space-y-6">
-                    <div className="bg-blue-600 rounded-2xl p-6 text-white shadow-xl shadow-blue-500/20">
-                      <h3 className="font-bold text-lg mb-2">Configuração ZimaOS</h3>
-                      <p className="text-blue-50 opacity-90 text-sm mb-4 leading-relaxed">
-                        Seus arquivos de email estão sendo armazenados diretamente na raiz do sistema de dados:
-                      </p>
-                      <code className="block bg-blue-700/50 px-3 py-2 rounded text-xs font-mono mb-6">
-                        /DATA/AppData/ZimaMail/
-                      </code>
-                      <button className="w-full py-2.5 bg-white text-blue-600 rounded-lg text-sm font-bold flex items-center justify-center gap-2 shadow-sm transition-transform active:scale-95">
-                        Abrir Gerenciador de Arquivos
-                        <ArrowRight className="w-4 h-4" />
-                      </button>
+                  {/* Secondary Metrics Bento (Col 1-12) */}
+                  <div className="lg:col-span-12 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <StatCard 
+                      icon={<Eye className="w-6 h-6" />} 
+                      iconColor="text-purple-600"
+                      title="Aberturas" 
+                      value={`${logs.filter(l => l.opened || l.message.includes('EMAIL ABERTO')).length ? Math.round((logs.filter(l => l.opened || l.message.includes('EMAIL ABERTO')).length / (logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length || 1)) * 100) : 0}%`}
+                      subtitle="Impacto de Leitura"
+                      progress={logs.filter(l => l.opened || l.message.includes('EMAIL ABERTO')).length ? Math.round((logs.filter(l => l.opened || l.message.includes('EMAIL ABERTO')).length / (logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length || 1)) * 100) : 0}
+                    />
+                    <StatCard 
+                      icon={<MousePointer2 className="w-6 h-6" />} 
+                      iconColor="text-amber-600"
+                      title="Cliques" 
+                      value={`${logs.filter(l => l.clicked || l.message.includes('CLIQUE')).length ? ((logs.filter(l => l.clicked || l.message.includes('CLIQUE')).length / (logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length || 1)) * 100).toFixed(1) : 0}%`}
+                      subtitle="CTR Relevância"
+                      progress={logs.filter(l => l.clicked || l.message.includes('CLIQUE')).length ? Math.round((logs.filter(l => l.clicked || l.message.includes('CLIQUE')).length / (logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length || 1)) * 100) : 0}
+                    />
+                    <div className="bg-slate-900 rounded-[32px] p-8 text-white relative overflow-hidden group shadow-xl flex items-center justify-between">
+                      <div className="relative z-10">
+                        <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] mb-2">SMTP</p>
+                        <h4 className="text-2xl font-black mb-1">{relays.length + (settings.smtp_host ? 1 : 0)} Canais</h4>
+                      </div>
+                      <Server className="w-16 h-16 text-white/5 absolute right-6 top-1/2 -translate-y-1/2" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Operational Body Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                  <div className="lg:col-span-8 space-y-8">
+                    {/* Performance Card */}
+                    <div className="bg-white border border-slate-200 rounded-[48px] p-10 shadow-sm">
+                      <div className="flex justify-between items-center mb-10">
+                        <div>
+                          <h3 className="text-3xl font-black text-slate-900 tracking-tighter">Performance de Campanhas</h3>
+                          <p className="text-sm text-slate-500 font-bold mt-1">Status em tempo real de cada disparo</p>
+                        </div>
+                        <button onClick={() => setActiveTab('campaigns')} className="px-6 py-3.5 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg active:scale-95">Relatório Full</button>
+                      </div>
+                      <div className="grid grid-cols-1 gap-4">
+                        {campaigns.slice(0, 3).map((camp) => {
+                          const stats = camp.stats || { sent: 0, opens: 0, clicks: 0, total: 0 };
+                          const openRate = stats.sent > 0 ? (stats.opens / stats.sent) * 100 : 0;
+                          return (
+                            <div key={camp.id} className="p-8 bg-slate-50/50 hover:bg-slate-50 rounded-[40px] border border-slate-100 flex items-center justify-between transition-all group border-l-4 border-l-blue-500">
+                              <div className="flex items-center gap-8">
+                                <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-sm text-blue-600 group-hover:scale-110 transition-transform">
+                                  <Zap className="w-8 h-8" />
+                                </div>
+                                <div>
+                                  <h4 className="text-xl font-black text-slate-900">{camp.name}</h4>
+                                  <div className="flex items-center gap-4 mt-2">
+                                    <span className="text-[10px] font-black uppercase text-slate-400 bg-white px-3 py-1 rounded-full border border-slate-200">{camp.status === 'completed' ? 'Finalizado' : 'Processando'}</span>
+                                    <p className="text-xs font-bold text-slate-500">{stats.sent.toLocaleString()} envios</p>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-12 pr-6">
+                                <div className="text-right">
+                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Abertura</p>
+                                  <p className="text-2xl font-black text-blue-600 tracking-tighter">{openRate.toFixed(1)}%</p>
+                                </div>
+                                <button onClick={() => setSelectedCampaign(camp)} className="w-12 h-12 bg-white border border-slate-200 rounded-full flex items-center justify-center text-slate-400 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm">
+                                  <ArrowRight className="w-6 h-6" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
 
-                    <div className="bg-slate-900 rounded-2xl p-6 text-white shadow-xl shadow-slate-900/10 border border-blue-500/20">
-                      <div className="flex items-center justify-between mb-6">
-                        <div className="flex items-center gap-2">
-                          <Zap className="w-5 h-5 text-blue-400" />
-                          <h3 className="font-bold">Protocolo SMTP (ZimaOS)</h3>
+                    {/* Fluxo de Transmissão */}
+                    <div className="bg-white border border-slate-200 rounded-[48px] p-10 shadow-sm">
+                      <div className="flex justify-between items-center mb-10">
+                        <div>
+                          <h3 className="text-3xl font-black text-slate-900 tracking-tighter">Fluxo de Transmissão</h3>
+                          <p className="text-sm text-slate-500 font-bold mt-1">Conexão direta porta 587/465</p>
                         </div>
-                        <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-[10px] font-black uppercase rounded border border-blue-500/30">
-                          Serviço Ativo
-                        </span>
+                        <div className="flex gap-2">
+                           <select 
+                            className="bg-slate-100 rounded-2xl px-4 py-2 text-xs font-black uppercase text-slate-600"
+                            onChange={(e) => setLogFilterStatus(e.target.value as any)}
+                            value={logFilterStatus}
+                           >
+                             <option value="all">Status: Todos</option>
+                             <option value="error">Erros</option>
+                             <option value="success">Sucesso</option>
+                           </select>
+                        </div>
+                      </div>
+                      <div className="space-y-3">
+                        {logs.filter(log => {
+                          if (logFilterStatus === 'error') return log.message.includes('Erro');
+                          if (logFilterStatus === 'success') return !log.message.includes('Erro');
+                          return true;
+                        }).slice(0, 6).map((log, i) => (
+                          <div key={log.id} className={`p-6 rounded-[28px] border transition-all flex items-center justify-between ${i % 2 === 0 ? 'bg-slate-50/50 border-transparent' : 'bg-white border-slate-100'}`}>
+                            <div className="flex items-center gap-6">
+                              <div className={`p-3 rounded-2xl shrink-0 ${
+                                log.message.includes('Erro') ? 'bg-red-50 text-red-500' :
+                                log.message.includes('enviado') ? 'bg-blue-50 text-blue-500' :
+                                log.message.includes('ABERTO') ? 'bg-amber-50 text-amber-500' :
+                                'bg-slate-100 text-slate-400'
+                              }`}>
+                                {log.message.includes('Erro') ? <AlertCircle className="w-5 h-5" /> :
+                                 log.message.includes('enviado') ? <ArrowUpRight className="w-5 h-5" /> :
+                                 log.message.includes('ABERTO') ? <Eye className="w-5 h-5" /> :
+                                 <Activity className="w-5 h-5" />}
+                              </div>
+                              <p className="text-sm font-black text-slate-700 truncate max-w-[500px]">{log.message}</p>
+                            </div>
+                            <span className="text-[11px] font-mono text-slate-400 font-black">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Sidebar */}
+                  <div className="lg:col-span-4 space-y-8">
+                    {/* Painel de Saúde */}
+                    <div className="bg-white border border-slate-200 rounded-[48px] p-10 shadow-sm">
+                      <div className="flex justify-between items-center mb-6">
+                        <div>
+                          <h3 className="text-2xl font-black text-slate-900 tracking-tight">Saúde dos Provedores</h3>
+                          <p className="text-[11px] text-slate-400 font-black uppercase tracking-widest mt-1">Status Proativo</p>
+                        </div>
+                       <Shield className="w-6 h-6 text-emerald-500" />
                       </div>
                       <div className="space-y-4">
-                        <div className="group relative p-3 bg-white/5 rounded-xl border border-white/10 hover:border-blue-500/50 transition-colors">
-                          <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Host de Conexão</p>
-                          <p className="text-sm font-mono text-blue-400">mail.{domains[0] || 'dominio.com'}</p>
-                          <button 
-                            onClick={() => navigator.clipboard.writeText(`mail.${domains[0] || 'dominio.com'}`)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1.5 bg-white/10 rounded-md hover:bg-white/20 transition-all"
-                          >
-                            <RefreshCw className="w-3 h-3" />
-                          </button>
+                        {relays.map((relay, index) => (
+                          <div key={index} className={`flex items-center justify-between p-4 border rounded-2xl ${
+                            relay.status === 'operational' ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'
+                          }`}>
+                            <span className={`font-bold ${relay.status === 'operational' ? 'text-emerald-800' : 'text-amber-800'}`}>
+                              {relay.name || 'SMTP Provedor'}
+                            </span>
+                            <span className={`text-xs font-black px-3 py-1 rounded-full uppercase ${
+                              relay.status === 'operational' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {relay.status === 'operational' ? 'OK' : 'Atenção'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Quota Management */}
+                    <div className="bg-white border border-slate-200 rounded-[48px] p-10 shadow-sm">
+                      <div className="flex justify-between items-center mb-10">
+                        <div>
+                          <h3 className="text-2xl font-black text-slate-900 tracking-tight">Status de Cotas</h3>
+                          <p className="text-[11px] text-slate-400 font-black uppercase tracking-widest mt-1">Limites SMTP ativos</p>
+                        </div>
+                        <Server className="w-6 h-6 text-slate-200" />
+                      </div>
+                      <div className="space-y-10">
+                        {relays.map((relay) => {
+                          const quota = relay.quota || 1000;
+                          const sent = relay.sent || 0;
+                          const perc = Math.min(100, Math.round((sent / quota) * 100));
+                          return (
+                            <div key={relay.id} className="space-y-4">
+                              <div className="flex justify-between items-end">
+                                <div>
+                                  <h5 className="text-xs font-black text-slate-900 uppercase tracking-widest mb-1 truncate max-w-[180px]">{relay.name || relay.host}</h5>
+                                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{sent.toLocaleString()} / {quota.toLocaleString()}</p>
+                                </div>
+                                <span className={`text-sm font-black tracking-tighter ${perc > 90 ? 'text-red-500' : 'text-blue-600'}`}>{perc}%</span>
+                              </div>
+                              <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden p-0.5">
+                                <motion.div 
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${perc}%` }}
+                                  className={`h-full rounded-full transition-all duration-1000 ${perc > 90 ? 'bg-red-500' : 'bg-blue-600'}`}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Relay Gateway */}
+                    <div className="bg-white border border-slate-200 rounded-[48px] p-10 shadow-sm">
+                      <div className="flex justify-between items-center mb-6">
+                        <div>
+                          <h3 className="text-2xl font-black text-slate-900 tracking-tight">Relay Gateway</h3>
+                          <div className="flex items-center gap-2 mt-1">
+                             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                             <p className="text-[11px] text-emerald-600 font-black uppercase tracking-widest">Operacional (Porta 2525)</p>
+                          </div>
+                        </div>
+                        <Settings className="w-6 h-6 text-slate-200" />
+                      </div>
+                      <div className="space-y-6">
+                         <div className="space-y-2">
+                           <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400">
+                             <span>Uso Total</span>
+                             <span>{relays.reduce((acc, r) => acc + (r.sent || 0), 0).toLocaleString()} / {relays.reduce((acc, r) => acc + (r.quota || 1000), 0).toLocaleString()}</span>
+                           </div>
+                           <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden p-0.5">
+                              <div className="h-full bg-blue-600 rounded-full" style={{ width: `${Math.min(100, Math.round((relays.reduce((acc, r) => acc + (r.sent || 0), 0) / (relays.reduce((acc, r) => acc + (r.quota || 1000), 0) || 1)) * 100))}%` }} />
+                           </div>
+                         </div>
+                         
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                           <div>
+                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Host de Saída</p>
+                             <p className="text-sm font-mono text-blue-600 break-all">{window.location.hostname}</p>
+                           </div>
+                           <button onClick={() => navigator.clipboard.writeText(window.location.hostname)} className="p-2 hover:bg-white rounded-lg text-slate-400">
+                             <Copy className="w-4 h-4" />
+                           </button>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tráfego recente (SMTP)</p>
+                          {logs.filter(l => l.type === 'smtp').slice(0, 3).map((log, i) => (
+                             <div key={i} className="text-[10px] font-mono text-slate-600 truncate bg-slate-50 p-2 rounded-lg">
+                               {log.message}
+                             </div>
+                          ))}
                         </div>
                         <div className="grid grid-cols-2 gap-4">
-                          <div className="p-3 bg-white/5 rounded-xl border border-white/10">
-                            <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Porta TLS</p>
-                            <p className="text-sm font-mono text-blue-400">587</p>
+                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Porta SMTP</p>
+                             <p className="text-sm font-black text-slate-700">2525</p>
                           </div>
-                          <div className="p-3 bg-white/5 rounded-xl border border-white/10">
-                            <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Porta SSL</p>
-                            <p className="text-sm font-mono text-blue-400">465</p>
+                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Segurança</p>
+                             <p className="text-sm font-black text-slate-700">None / STARTTLS</p>
                           </div>
                         </div>
-                        <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/20">
-                          <p className="text-[10px] font-bold text-blue-400 uppercase mb-1">Dica de Segurança</p>
-                          <p className="text-[11px] text-slate-300 leading-relaxed italic">
-                            Conecte seu CRM acima usando qualquer conta da aba <b>Accounts</b>. 
-                            Recomendamos o modo <b>Relay Externo</b> nas Settings para e-mails não caírem no spam.
-                          </p>
+                         <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Autenticação</p>
+                           <p className="text-sm font-black text-slate-700">Suas Contas ZimaMail</p>
                         </div>
                       </div>
                     </div>
 
-                    <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse" />
-                        <span className="text-sm text-slate-600">Conectado ao Supabase</span>
-                      </div>
-                      <div className="text-xs text-slate-400 font-mono line-clamp-1 bg-slate-50 p-2 rounded">
-                        ais-supabase-project.supabase.co
+                    {/* Quick Access */}
+                    <div className="bg-slate-900 rounded-[48px] p-10 text-white relative overflow-hidden shadow-2xl group">
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 group-hover:scale-125 transition-transform" />
+                      <h3 className="text-xl font-black mb-4 relative z-10">ZimaMail Network</h3>
+                      <p className="text-slate-400 text-xs font-bold leading-relaxed mb-8 opacity-80 relative z-10">Proteção de reputação e monitoramento Cloud ZimaOS ativado.</p>
+                      <div className="grid grid-cols-2 gap-4 relative z-10">
+                        <button onClick={() => setActiveTab('dns')} className="p-4 bg-white/5 border border-white/10 rounded-[28px] hover:bg-white/10 transition-all flex flex-col items-center justify-center">
+                          <Globe className="w-6 h-6 text-indigo-400 mb-2" />
+                          <span className="text-[9px] font-black uppercase tracking-widest">DNS Config</span>
+                        </button>
+                        <button onClick={() => setIsAccountModalOpen(true)} className="p-4 bg-white/5 border border-white/10 rounded-[28px] hover:bg-white/10 transition-all flex flex-col items-center justify-center">
+                          <Plus className="w-6 h-6 text-emerald-400 mb-2" />
+                          <span className="text-[9px] font-black uppercase tracking-widest">Nova Conta</span>
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -654,6 +945,12 @@ export default function App() {
 
                 {/* Email List */}
                 <div className={`${selectedEmail ? 'hidden lg:block' : 'block'} lg:col-span-4 border-r border-slate-100 overflow-y-auto max-h-[700px]`}>
+                  {emails.length === 0 && (
+                    <div className="py-20 text-center text-slate-400">
+                      <Mail className="w-12 h-12 mx-auto mb-4 opacity-10" />
+                      <p className="text-sm font-bold uppercase tracking-widest">Caixa vazia</p>
+                    </div>
+                  )}
                   {emails.map(email => (
                     <button 
                       key={email.id}
@@ -705,6 +1002,7 @@ export default function App() {
                 </div>
               </motion.div>
             )}
+
 
             {activeTab === 'campaigns' && renderCampaigns()}
             {activeTab === 'dns' && (
@@ -825,7 +1123,61 @@ export default function App() {
                        </div>
                     </div>
 
+                    <div className="p-4 bg-white/5 rounded-2xl border border-white/10 mb-4">
+                       <div className="flex items-center gap-3 mb-4">
+                         <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400">
+                           <Zap size={18} />
+                         </div>
+                         <div>
+                           <h3 className="text-sm font-bold text-white">Relay Gateway (SMTP Interno)</h3>
+                           <p className="text-[10px] text-slate-400">Use o ZimaMail como servidor de saída em seus outros apps.</p>
+                         </div>
+                       </div>
+                       
+                       <div className="space-y-3">
+                         <div className="p-3 bg-white/5 rounded-xl border border-white/5">
+                           <p className="text-[10px] font-black text-slate-500 uppercase mb-2">Configurações de Conexão</p>
+                           <div className="grid grid-cols-2 gap-4">
+                             <div>
+                                <p className="text-[9px] text-slate-400 mb-0.5">Host de Saída</p>
+                                <code className="text-[11px] text-blue-400 select-all">{window.location.hostname}</code>
+                             </div>
+                             <div>
+                                <p className="text-[9px] text-slate-400 mb-0.5">Porta SMTP</p>
+                                <code className="text-[11px] text-emerald-400">2525</code>
+                             </div>
+                             <div>
+                                <p className="text-[9px] text-slate-400 mb-0.5">Segurança</p>
+                                <code className="text-[11px] text-slate-300">Nenhuma / STARTTLS</code>
+                             </div>
+                             <div>
+                                <p className="text-[9px] text-slate-400 mb-0.5">Autenticação</p>
+                                <code className="text-[11px] text-slate-300">Suas Contas ZimaMail</code>
+                             </div>
+                           </div>
+                         </div>
+                         
+                         <p className="text-[10px] text-slate-500 italic leading-relaxed">
+                           Ao conectar seus apps a este gateway, o ZimaMail distribuirá os e-mails automaticamente entre seus relays externos com failover e rastreamento ativos.
+                         </p>
+                       </div>
+                    </div>
+
                     <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
+                       <div className="mb-4 space-y-3">
+                          <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl">
+                             <p className="text-[10px] font-black text-amber-500 uppercase mb-1 flex items-center gap-1.5">
+                               <AlertCircle size={10} />
+                               Aviso: Verificação de Domínio
+                             </p>
+                             <p className="text-[11px] text-slate-300 leading-relaxed">
+                               <strong>Brevo/MailerSend:</strong> O domínio <code className="text-blue-400">{domains[0] || 'seu-dominio.com'}</code> deve estar 100% verificado (SPF/DKIM) no painel do provedor.
+                             </p>
+                             <p className="text-[11px] text-slate-400 mt-2">
+                               Erro #MS42207 (MailerSend) significa que o domínio do remetente não foi validado.
+                             </p>
+                          </div>
+                       </div>
                        <div className="flex justify-between items-center mb-3">
                           <p className="text-[10px] font-black text-emerald-400 uppercase">Segurança e Entregabilidade (SPF/DKIM/DMARC)</p>
                           <span className="text-[9px] text-slate-500 bg-white/5 px-2 py-0.5 rounded">Configuração Cloudflare Ativa</span>
@@ -949,7 +1301,10 @@ export default function App() {
                         />
                       </div>
                       <button 
-                        onClick={() => setIsAccountModalOpen(true)}
+                        onClick={() => {
+                          setEditAccount(null);
+                          setIsAccountModalOpen(true);
+                        }}
                         className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all shadow-lg shadow-blue-500/20 active:scale-95"
                       >
                         <Plus className="w-4 h-4" /> Criar Conta
@@ -977,13 +1332,18 @@ export default function App() {
                             <tr key={account.id} className="hover:bg-slate-50/50 transition-colors group">
                               <td className="py-4 px-4">
                                 <div className="flex items-center gap-3">
-                                  <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-bold border border-blue-100">
+                                  <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center center text-blue-600 font-bold border border-blue-100 flex items-center justify-center">
                                     {account.name?.[0] || account.email[0]}
                                   </div>
                                   <div>
                                     <p className="font-bold text-slate-900 leading-none mb-1">{account.name}</p>
                                     <p className="text-xs text-slate-500">{account.email}</p>
                                   </div>
+                                </div>
+                              </td>
+                              <td className="py-4 px-4 font-mono text-[11px] text-slate-500">
+                                <div className="flex items-center gap-2">
+                                  <code className="bg-slate-100 px-2 py-0.5 rounded">{account.password || 'Sem Senha'}</code>
                                 </div>
                               </td>
                               <td className="py-4 px-4">
@@ -994,7 +1354,25 @@ export default function App() {
                               </td>
                               <td className="py-4 px-4 text-right">
                                 <div className="flex justify-end gap-2">
-                                  <button className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all">
+                                  <button 
+                                    onClick={() => {
+                                      setEditAccount(account);
+                                      setIsAccountModalOpen(true);
+                                    }}
+                                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                                    title="Editar"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                  <button 
+                                    onClick={async () => {
+                                      if (confirm(`Tem certeza que deseja remover a conta ${account.email}?`)) {
+                                        const res = await fetch(`/api/accounts/${account.id}`, { method: 'DELETE' });
+                                        if (res.ok) fetchAccounts();
+                                      }
+                                    }}
+                                    className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                                  >
                                     <Trash2 className="w-4 h-4" />
                                   </button>
                                 </div>
@@ -1203,6 +1581,32 @@ export default function App() {
                                 </div>
                                 <div className="flex gap-1">
                                   <button 
+                                    onClick={() => {
+                                      setEditingRelay(relay);
+                                      setIsRelayModalOpen(true);
+                                    }}
+                                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                                    title="Editar"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                  <button 
+                                    onClick={() => moveRelay(index, 'up')}
+                                    disabled={index === 0}
+                                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all disabled:opacity-30"
+                                    title="Mover para cima"
+                                  >
+                                    <ArrowUp className="w-4 h-4" />
+                                  </button>
+                                  <button 
+                                    onClick={() => moveRelay(index, 'down')}
+                                    disabled={index === relays.length - 1}
+                                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all disabled:opacity-30"
+                                    title="Mover para baixo"
+                                  >
+                                    <ArrowDown className="w-4 h-4" />
+                                  </button>
+                                  <button 
                                     onClick={async (e) => {
                                       const btn = e.currentTarget as HTMLButtonElement;
                                       if (btn) btn.disabled = true;
@@ -1349,23 +1753,37 @@ export default function App() {
         isOpen={isComposeOpen} 
         onClose={() => setIsComposeOpen(false)} 
         settings={settings}
+        accounts={accounts}
       />
       <AccountModal 
         isOpen={isAccountModalOpen} 
-        onClose={() => setIsAccountModalOpen(false)} 
+        onClose={() => {
+          setIsAccountModalOpen(false);
+          setEditAccount(null);
+        }}
         onSuccess={fetchAccounts}
         domains={domains}
+        editAccount={editAccount}
       />
       <RelayModal 
         isOpen={isRelayModalOpen} 
-        onClose={() => setIsRelayModalOpen(false)} 
+        onClose={() => {
+          setIsRelayModalOpen(false);
+          setEditingRelay(null);
+        }} 
         onSuccess={fetchRelays}
+        initialData={editingRelay}
       />
       <CampaignModal 
         isOpen={isCampaignModalOpen} 
         onClose={() => setIsCampaignModalOpen(false)} 
         onSuccess={fetchCampaigns}
         accounts={accounts}
+      />
+
+      <CampaignDetailsModal 
+        campaign={selectedCampaign}
+        onClose={() => setSelectedCampaign(null)}
       />
     </div>
 
@@ -1431,19 +1849,27 @@ function MailFolderItem({ label, count, active, icon }: { label: string, count?:
   );
 }
 
-function ComposeModal({ isOpen, onClose, settings }: { isOpen: boolean, onClose: () => void, settings: any }) {
+function ComposeModal({ isOpen, onClose, settings, accounts }: { isOpen: boolean, onClose: () => void, settings: any, accounts: any[] }) {
   const [to, setTo] = useState("");
+  const [from, setFrom] = useState(accounts[0]?.email || "");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
 
+  useEffect(() => {
+    if (accounts.length > 0 && !from) {
+      setFrom(accounts[0].email);
+    }
+  }, [accounts]);
+
   const handleSend = async () => {
+    if (!from) return alert("Selecione uma conta de remetente");
     setSending(true);
     try {
       const res = await fetch("/api/mail/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to, subject, body })
+        body: JSON.stringify({ to, subject, body, from })
       });
       const data = await res.json();
       if (data.success) {
@@ -1485,13 +1911,29 @@ function ComposeModal({ isOpen, onClose, settings }: { isOpen: boolean, onClose:
         </div>
         <div className="p-6 space-y-4">
           <div className="space-y-4">
-            <input 
-              type="text" 
-              placeholder="Para: (ex: cliente@gmail.com)" 
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              className="w-full p-4 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm" 
-            />
+            <div className="space-y-1.5">
+              <p className="text-[10px] text-slate-400 font-bold uppercase ml-1">De (Remetente)</p>
+              <select 
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+                className="w-full p-4 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm font-bold"
+              >
+                {accounts.map(acc => (
+                  <option key={acc.email} value={acc.email}>{acc.email}</option>
+                ))}
+                {accounts.length === 0 && <option value="">Nenhuma conta disponível</option>}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-[10px] text-slate-400 font-bold uppercase ml-1">Para (Destinatário)</p>
+              <input 
+                type="text" 
+                placeholder="ex: cliente@gmail.com" 
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+                className="w-full p-4 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm" 
+              />
+            </div>
             
             {settings.delivery_mode === 'internal' && isExternalDomain(to) && (
               <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl flex gap-3 items-start">
@@ -1543,15 +1985,33 @@ function ComposeModal({ isOpen, onClose, settings }: { isOpen: boolean, onClose:
   );
 }
 
-function RelayModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: () => void, onSuccess: () => void }) {
+function RelayModal({ isOpen, onClose, onSuccess, initialData }: { isOpen: boolean, onClose: () => void, onSuccess: () => void, initialData?: any }) {
   const [formData, setFormData] = useState({
     name: '',
     host: '',
     port: '587',
     user: '',
-    pass: ''
+    pass: '',
+    quota: '1000',
+    apiKey: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (initialData && isOpen) {
+      setFormData({
+        name: initialData.name || '',
+        host: initialData.host || '',
+        port: initialData.port || '587',
+        user: initialData.user || '',
+        pass: initialData.pass || '',
+        quota: String(initialData.quota || '1000'),
+        apiKey: initialData.apiKey || ''
+      });
+    } else {
+      setFormData({ name: '', host: '', port: '587', user: '', pass: '', quota: '1000', apiKey: '' });
+    }
+  }, [initialData, isOpen]);
 
   if (!isOpen) return null;
 
@@ -1559,15 +2019,21 @@ function RelayModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: 
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      const res = await fetch('/api/relays', {
-        method: 'POST',
+      const url = initialData ? `/api/relays/${initialData.id}` : '/api/relays';
+      const method = initialData ? 'PUT' : 'POST';
+      
+      const res = await fetch(url, {
+        method: method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify({
+          ...formData,
+          quota: parseInt(formData.quota) || 1000
+        })
       });
       if (res.ok) {
         onSuccess();
         onClose();
-        setFormData({ name: '', host: '', port: '587', user: '', pass: '' });
+        if (!initialData) setFormData({ name: '', host: '', port: '587', user: '', pass: '' });
       } else {
         alert('Erro ao salvar relay.');
       }
@@ -1590,7 +2056,7 @@ function RelayModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: 
             <div className="p-2 bg-blue-600 rounded-xl text-white">
               <Zap className="w-5 h-5" />
             </div>
-            <h3 className="font-bold text-slate-900">Novo Provedor SMTP</h3>
+            <h3 className="font-bold text-slate-900">{initialData ? 'Editar Provedor SMTP' : 'Novo Provedor SMTP'}</h3>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-lg text-slate-500">×</button>
         </div>
@@ -1609,19 +2075,20 @@ function RelayModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: 
               />
             </div>
             
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="sm:col-span-2 space-y-1.5">
-                <label className="block text-xs font-black text-slate-400 uppercase ml-1">Host SMTP</label>
-                <input 
-                  required
-                  type="text" 
-                  value={formData.host}
-                  onChange={e => setFormData({ ...formData, host: e.target.value })}
-                  placeholder="smtp.provider.com" 
-                  className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 text-sm transition-all" 
-                />
-              </div>
-              <div className="sm:col-span-1 space-y-1.5">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-black text-slate-400 uppercase ml-1">Host SMTP</label>
+              <input 
+                required
+                type="text" 
+                value={formData.host}
+                onChange={e => setFormData({ ...formData, host: e.target.value })}
+                placeholder="smtp.provider.com" 
+                className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 text-sm transition-all" 
+              />
+            </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
                 <label className="block text-xs font-black text-slate-400 uppercase ml-1">Porta</label>
                 <input 
                   required
@@ -1632,9 +2099,35 @@ function RelayModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: 
                   className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 text-sm transition-all text-center font-mono" 
                 />
               </div>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-black text-slate-400 uppercase ml-1">Quota (Envios)</label>
+                <input 
+                  required
+                  type="number" 
+                  value={formData.quota}
+                  onChange={e => setFormData({ ...formData, quota: e.target.value })}
+                  placeholder="1000" 
+                  className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 text-sm transition-all text-center font-mono" 
+                />
+              </div>
             </div>
 
             <div className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-2 text-xs font-black text-slate-400 uppercase ml-1">
+                  API Key (Opcional)
+                  <span className="px-1.5 py-0.5 bg-blue-50 text-blue-600 text-[8px] rounded uppercase tracking-tighter">Sincronização</span>
+                </label>
+                <input 
+                  type="password" 
+                  value={formData.apiKey}
+                  onChange={e => setFormData({ ...formData, apiKey: e.target.value })}
+                  placeholder="Chave de API do provedor" 
+                  className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 text-sm transition-all" 
+                />
+                <p className="text-[9px] text-slate-400 px-1 font-bold italic">Usada para sincronizar cotas e limites reais no Dashboard (Suportado: Brevo).</p>
+              </div>
+
               <div className="space-y-1.5">
                 <label className="block text-xs font-black text-slate-400 uppercase ml-1">Usuário / Email</label>
                 <input 
@@ -1647,13 +2140,13 @@ function RelayModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: 
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="block text-xs font-black text-slate-400 uppercase ml-1">Senha / Token</label>
+                <label className="block text-xs font-black text-slate-400 uppercase ml-1">{initialData ? 'Senha / Token (Preencha para alterar)' : 'Senha / Token'}</label>
                 <input 
-                  required
+                  required={!initialData}
                   type="password" 
                   value={formData.pass}
                   onChange={e => setFormData({ ...formData, pass: e.target.value })}
-                  placeholder="Sua senha SMTP secreta" 
+                  placeholder={initialData ? "Deixe em branco para manter a atual" : "Sua senha SMTP secreta"} 
                   className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 text-sm transition-all" 
                 />
               </div>
@@ -1677,7 +2170,7 @@ function RelayModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: 
                   <RefreshCw className="w-4 h-4 animate-spin" /> Salvando...
                 </>
               ) : (
-                'Cadastrar Relay'
+                initialData ? 'Salvar Alterações' : 'Cadastrar Relay'
               )}
             </button>
           </div>
@@ -1694,7 +2187,8 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts }: { isOpen: boole
     from: accounts[0]?.email || '',
     subject: '',
     body: '',
-    recipients: ''
+    recipients: '',
+    delay: 2 // default 2 seconds
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -1704,33 +2198,29 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts }: { isOpen: boole
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      const recipientList = formData.recipients.split(/[,\n]/).map(r => r.trim()).filter(r => r.includes('@'));
+      // Parsing recipients: Email;Name or just Email
+      const recipientList = formData.recipients
+        .split('\n')
+        .map(line => {
+          const [email, name] = line.split(';').map(s => s.trim());
+          return { email, name: name || email.split('@')[0] };
+        })
+        .filter(r => r.email.includes('@'));
       
       const res = await fetch('/api/campaigns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...formData,
-          recipients_count: recipientList.length
+          name: formData.name,
+          from: formData.from,
+          subject: formData.subject,
+          body: formData.body,
+          recipients: recipientList,
+          delay: Number(formData.delay) * 1000 // Converter para ms
         })
       });
 
       if (res.ok) {
-        const { campaign } = await res.json();
-        // Iniciar envio em massa (simulado/paralelo)
-        for (const to of recipientList) {
-          fetch('/api/mail/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              from: formData.from,
-              to,
-              subject: formData.subject,
-              body: formData.body,
-              campaignId: campaign.id
-            })
-          });
-        }
         onSuccess();
         onClose();
         setFormData({ name: '', from: accounts[0]?.email || '', subject: '', body: '', recipients: '' });
@@ -1771,39 +2261,64 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts }: { isOpen: boole
           {step === 1 ? (
             <div className="p-10 space-y-8">
                <div className="space-y-4">
-                 <label className="block text-xs font-black text-slate-400 uppercase ml-1">Dados Básicos</label>
+                 <label className="block text-xs font-black text-slate-400 uppercase ml-1">Configuração de Envio</label>
                  <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] text-slate-400 font-bold uppercase ml-1">Nome da Campanha</p>
+                      <input 
+                        required
+                        type="text" 
+                        value={formData.name}
+                        onChange={e => setFormData({...formData, name: e.target.value})}
+                        placeholder="Ex: Newsletter Maio 2024"
+                        className="w-full p-5 bg-slate-50 rounded-3xl border border-slate-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] text-slate-400 font-bold uppercase ml-1">Conta de Saída</p>
+                      <select 
+                        value={formData.from}
+                        onChange={e => setFormData({...formData, from: e.target.value})}
+                        className="w-full p-5 bg-slate-50 rounded-3xl border border-slate-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold"
+                      >
+                        {accounts.map(acc => (
+                          <option key={acc.email} value={acc.email}>Relay Local: {acc.email}</option>
+                        ))}
+                      </select>
+                    </div>
+                 </div>
+                 <div className="space-y-1.5">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase ml-1">Intervalo entre Envios (Segundos)</p>
                     <input 
                       required
-                      type="text" 
-                      value={formData.name}
-                      onChange={e => setFormData({...formData, name: e.target.value})}
-                      placeholder="Nome Interno da Campanha"
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={formData.delay}
+                      onChange={e => setFormData({...formData, delay: e.target.value})}
+                      placeholder="Ex: 2"
                       className="w-full p-5 bg-slate-50 rounded-3xl border border-slate-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold"
                     />
-                    <select 
-                      value={formData.from}
-                      onChange={e => setFormData({...formData, from: e.target.value})}
-                      className="w-full p-5 bg-slate-50 rounded-3xl border border-slate-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold"
-                    >
-                      {accounts.map(acc => (
-                        <option key={acc.email} value={acc.email}>Remetente: {acc.email}</option>
-                      ))}
-                    </select>
                  </div>
                </div>
 
                <div className="space-y-4">
-                 <label className="block text-xs font-black text-slate-400 uppercase ml-1">Lista de Destinatários</label>
+                 <div className="flex justify-between items-center px-1">
+                   <label className="block text-xs font-black text-slate-400 uppercase">Lista de Destinatários</label>
+                   <span className="text-[10px] text-blue-600 font-black uppercase tracking-widest cursor-help underline underline-offset-4 decoration-blue-200">Formato Suportado: email;nome</span>
+                 </div>
                  <textarea 
                    required
                    value={formData.recipients}
                    onChange={e => setFormData({...formData, recipients: e.target.value})}
-                   placeholder="Cole aqui os e-mails separados por linha ou vírgula..."
+                   placeholder={`contato@empresa.com;João\nsuporte@cliente.com;Maria\nfinanceiro@loja.com`}
                    rows={6}
                    className="w-full p-6 bg-slate-50 rounded-[32px] border border-slate-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-mono text-sm leading-relaxed"
                  />
-                 <p className="text-[10px] text-slate-400 px-2 italic text-right">Dica: Você pode copiar direto do Excel ou Google Sheets.</p>
+                 <div className="bg-blue-50 p-4 rounded-2xl flex items-center gap-4 border border-blue-100">
+                    <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-blue-600 font-black text-[10px] border border-blue-200">?</div>
+                    <p className="text-[10px] text-blue-700 leading-relaxed font-medium">Use <b>email;nome</b> (um por linha) para personalizar sua mensagem com <b>&#123;&#123;name&#125;&#125;</b> e <b>&#123;&#123;email&#125;&#125;</b>.</p>
+                 </div>
                </div>
             </div>
           ) : (
@@ -1875,13 +2390,304 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts }: { isOpen: boole
   );
 }
 
-function AccountModal({ isOpen, onClose, onSuccess, domains }: { isOpen: boolean, onClose: () => void, onSuccess: () => void, domains: string[] }) {
+function Login({ onLogin }: { onLogin: (user: any) => void }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    setError('');
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (data.success) {
+        onLogin(data.user);
+      } else {
+        setError(data.message || 'Credenciais inválidas');
+      }
+    } catch (err) {
+      setError('Erro de conexão com o servidor');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 selection:bg-blue-500/30">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(37,99,235,0.1),transparent_70%)] pointer-events-none" />
+      
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-md"
+      >
+        <div className="text-center mb-8">
+          <div className="w-20 h-20 bg-blue-600 rounded-[32px] shadow-2xl shadow-blue-500/40 flex items-center justify-center mx-auto mb-6 transform -rotate-6">
+            <Mail className="w-10 h-10 text-white" />
+          </div>
+          <h1 className="text-4xl font-black text-white tracking-tight mb-2">ZimaMail</h1>
+          <p className="text-slate-400 font-medium">Painel Administrativo do Provedor</p>
+        </div>
+
+        <div className="bg-white/5 backdrop-blur-xl rounded-[40px] border border-white/10 p-8 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-purple-600 to-blue-600" />
+          
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {error && (
+              <motion.div 
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 text-sm font-medium flex items-center gap-3"
+              >
+                <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                {error}
+              </motion.div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-black text-slate-500 uppercase ml-2 tracking-widest">E-mail</label>
+              <div className="relative">
+                <input 
+                  required
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="admin@zimamail.com"
+                  className="w-full p-5 bg-white/5 rounded-3xl border border-white/10 focus:border-blue-500/50 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none text-white font-medium"
+                />
+                <Mail className="absolute right-5 top-5 w-5 h-5 text-slate-600" />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-black text-slate-500 uppercase ml-2 tracking-widest">Senha</label>
+              <div className="relative">
+                <input 
+                  required
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full p-5 bg-white/5 rounded-3xl border border-white/10 focus:border-blue-500/50 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none text-white font-medium"
+                />
+                <Lock className="absolute right-5 top-5 w-5 h-5 text-slate-600" />
+              </div>
+            </div>
+
+            <button 
+              disabled={isSubmitting}
+              type="submit"
+              className="w-full p-5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-3xl font-black text-sm uppercase tracking-widest shadow-xl shadow-blue-500/20 transition-all active:scale-95 flex items-center justify-center gap-3"
+            >
+              {isSubmitting ? (
+                <RefreshCw className="w-5 h-5 animate-spin" />
+              ) : (
+                <>
+                  Entrar no Painel
+                  <ArrowRight className="w-5 h-5" />
+                </>
+              )}
+            </button>
+          </form>
+        </div>
+
+        <p className="text-center mt-10 text-slate-500 text-sm font-medium">
+          Sistema Seguro ZimaMail &copy; 2024
+        </p>
+      </motion.div>
+    </div>
+  );
+}
+
+function CampaignDetailsModal({ campaign, onClose }: { campaign: any, onClose: () => void }) {
+  const [activeView, setActiveView] = useState<'recipients' | 'events'>('recipients');
+  if (!campaign) return null;
+
+  const stats = campaign.stats || { total: 0, sent: 0, failed: 0, opens: 0, clicks: 0 };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[120] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white rounded-[40px] shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden border border-slate-200 flex flex-col"
+      >
+        <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
+               <Zap className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-black text-xl text-slate-900 tracking-tight">{campaign.name}</h3>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">ID: {campaign.id}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-3 hover:bg-slate-200 rounded-2xl text-slate-400 transition-colors">
+             <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        <div className="p-8 grid grid-cols-3 md:grid-cols-6 gap-3 bg-slate-50 border-b border-slate-100">
+           <div className="bg-white p-4 rounded-[24px] border border-slate-200 text-center shadow-sm">
+              <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Enviados</p>
+              <p className="text-base font-black text-slate-900">{stats.sent}</p>
+           </div>
+           <div className="bg-white p-4 rounded-[24px] border border-slate-200 text-center shadow-sm text-red-600">
+              <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Falhas</p>
+              <p className="text-base font-black">{stats.failed}</p>
+           </div>
+           <div className="bg-white p-4 rounded-[24px] border border-slate-200 text-center shadow-sm text-blue-600">
+              <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Aberturas</p>
+              <p className="text-base font-black">{stats.opens}</p>
+           </div>
+           <div className="bg-white p-4 rounded-[24px] border border-slate-200 text-center shadow-sm text-emerald-600">
+              <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Cliques</p>
+              <p className="text-base font-black">{stats.clicks}</p>
+           </div>
+           <div className="bg-white p-4 rounded-[24px] border border-slate-200 text-center shadow-sm text-purple-600">
+              <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Conversão</p>
+              <p className="text-base font-black">{stats.sent > 0 ? ((stats.clicks / stats.sent) * 100).toFixed(1) : 0}%</p>
+           </div>
+           <div className="bg-white p-4 rounded-[24px] border border-slate-200 text-center shadow-sm text-amber-600">
+              <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Abertura Unique</p>
+              <p className="text-base font-black">{stats.sent > 0 ? ((stats.opens / stats.sent) * 100).toFixed(1) : 0}%</p>
+           </div>
+        </div>
+
+        <div className="flex p-2 bg-slate-100 rounded-2xl mx-8 mt-6">
+           <button 
+             onClick={() => setActiveView('recipients')}
+             className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${activeView === 'recipients' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+           >
+             Destinatários
+           </button>
+           <button 
+             onClick={() => setActiveView('events')}
+             className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${activeView === 'events' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+           >
+             Linha do Tempo
+           </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-8 bg-white">
+           {activeView === 'recipients' ? (
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="pb-4 text-[10px] font-black text-slate-400 uppercase">Destinatário</th>
+                    <th className="pb-4 text-[10px] font-black text-slate-400 uppercase">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {campaign.recipients?.map((r: any, idx: number) => (
+                    <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="py-4">
+                        <p className="font-bold text-slate-900">{r.name}</p>
+                        <p className="text-[10px] text-slate-400 font-mono tracking-tight">{r.email}</p>
+                      </td>
+                      <td className="py-4">
+                        <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${
+                          r.status === 'sent' ? 'bg-emerald-100 text-emerald-600' : 
+                          r.status === 'failed' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          {r.status === 'sent' ? 'ENVIADO' : r.status === 'failed' ? 'ERRO' : 'PENDENTE'}
+                        </span>
+                        {r.error && <p className="text-[8px] text-red-400 mt-1 max-w-[150px] truncate">{r.error}</p>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+           ) : (
+             <div className="space-y-6">
+                {(campaign.events || []).length > 0 ? (
+                  campaign.events.map((event: any, idx: number) => (
+                    <div key={idx} className="flex gap-4 relative">
+                       {idx !== campaign.events.length - 1 && <div className="absolute left-[19px] top-10 bottom-0 w-px bg-slate-100" />}
+                       <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border-2 border-white shadow-sm ${
+                         event.type === 'open' ? 'bg-blue-500 text-white' : 'bg-emerald-500 text-white'
+                       }`}>
+                          {event.type === 'open' ? <Eye className="w-4 h-4" /> : <Zap className="w-4 h-4" />}
+                       </div>
+                       <div className="flex-1 pb-6 border-b border-slate-50">
+                          <div className="flex justify-between items-start mb-1">
+                             <p className="text-xs font-black text-slate-900">
+                                {event.recipient} {event.type === 'open' ? 'abriu o email' : 'clicou no link'}
+                             </p>
+                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                {new Date(event.at).toLocaleTimeString()}
+                             </p>
+                          </div>
+                          {event.url && <p className="text-[10px] text-blue-500 font-mono mb-2 break-all">{event.url}</p>}
+                          <div className="flex gap-3">
+                             <div className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 rounded text-[9px] font-bold text-slate-500 uppercase tracking-widest">
+                                <Activity className="w-3 h-3" /> {event.ip}
+                             </div>
+                             <div className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 rounded text-[9px] font-bold text-slate-500 max-w-[200px] truncate" title={event.ua}>
+                                {event.ua}
+                             </div>
+                          </div>
+                       </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="py-20 text-center text-slate-300">
+                     <Activity className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                     <p className="font-bold text-xs uppercase tracking-widest">Aguardando interações...</p>
+                     <p className="text-[10px] mt-1">Os eventos aparecerão em tempo real assim que os destinatários interagirem.</p>
+                  </div>
+                )}
+             </div>
+           )}
+        </div>
+        
+        <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-center">
+           <button 
+             onClick={onClose}
+             className="px-8 py-3 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all"
+           >
+             Fechar Relatório
+           </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function AccountModal({ isOpen, onClose, onSuccess, domains, editAccount }: { isOpen: boolean, onClose: () => void, onSuccess: () => void, domains: string[], editAccount?: any }) {
   const [formData, setFormData] = useState({
-    email: '',
+    email_prefix: '',
     full_name: '',
+    password: '',
     domain: domains[0] || 'amplifamarketing.com.br'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (editAccount) {
+      const [prefix, domain] = editAccount.email.split('@');
+      setFormData({
+        email_prefix: prefix,
+        full_name: editAccount.name,
+        password: editAccount.password,
+        domain: domain
+      });
+    } else {
+      setFormData({
+        email_prefix: '',
+        full_name: '',
+        password: '',
+        domain: domains[0] || 'amplifamarketing.com.br'
+      });
+    }
+  }, [editAccount, domains]);
 
   if (!isOpen) return null;
 
@@ -1890,25 +2696,27 @@ function AccountModal({ isOpen, onClose, onSuccess, domains }: { isOpen: boolean
     setIsSubmitting(true);
     
     try {
-      const res = await fetch('/api/accounts', {
-        method: 'POST',
+      const url = editAccount ? `/api/accounts/${editAccount.id}` : '/api/accounts';
+      const method = editAccount ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: `${formData.email}@${formData.domain}`,
+          email: `${formData.email_prefix}@${formData.domain}`,
           name: formData.full_name,
-          password: 'zima-temp-pass' // Em produção usar um gerador de senha
+          password: formData.password
         })
       });
       const data = await res.json();
       if (data.success) {
         onSuccess();
         onClose();
-        setFormData({ email: '', full_name: '', domain: 'amplifamarketing.com.br' });
       } else {
         alert('Erro: ' + data.message);
       }
     } catch (err) {
-      alert('Erro ao criar conta: ' + (err as Error).message);
+      alert('Erro ao processar: ' + (err as Error).message);
     } finally {
       setIsSubmitting(false);
     }
@@ -1924,7 +2732,7 @@ function AccountModal({ isOpen, onClose, onSuccess, domains }: { isOpen: boolean
         <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
           <div className="flex items-center gap-2">
             <Users className="w-5 h-5 text-blue-600" />
-            <h3 className="font-bold text-slate-900">Nova Conta de Email</h3>
+            <h3 className="font-bold text-slate-900">{editAccount ? 'Editar Conta' : 'Nova Conta de Email / Usuário SMTP'}</h3>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-lg text-slate-500">×</button>
         </div>
@@ -1949,8 +2757,8 @@ function AccountModal({ isOpen, onClose, onSuccess, domains }: { isOpen: boolean
                 <input 
                   required
                   type="text" 
-                  value={formData.email}
-                  onChange={e => setFormData({ ...formData, email: e.target.value })}
+                  value={formData.email_prefix}
+                  onChange={e => setFormData({ ...formData, email_prefix: e.target.value })}
                   placeholder="Ex: contato" 
                   className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all" 
                 />
@@ -1965,9 +2773,20 @@ function AccountModal({ isOpen, onClose, onSuccess, domains }: { isOpen: boolean
                   {domains.map(d => (
                     <option key={d} value={d}>@{d}</option>
                   ))}
-                  {domains.length === 0 && <option value="amplifamarketing.com.br">@amplifamarketing.com.br</option>}
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-1">Senha SMTP (Acesso)</label>
+              <input 
+                required
+                type="password" 
+                value={formData.password}
+                onChange={e => setFormData({ ...formData, password: e.target.value })}
+                placeholder="Defina uma senha para seus apps" 
+                className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all" 
+              />
             </div>
 
             <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 flex items-start gap-3">
@@ -1995,7 +2814,7 @@ function AccountModal({ isOpen, onClose, onSuccess, domains }: { isOpen: boolean
                   <RefreshCw className="w-4 h-4 animate-spin" /> Salvando...
                 </>
               ) : (
-                'Criar Conta'
+                editAccount ? 'Salvar Alterações' : 'Criar Conta'
               )}
             </button>
           </div>
@@ -2085,22 +2904,43 @@ function DNSRowDark({ type, host, content, priority, desc }: any) {
   );
 }
 
-function StatCard({ title, value, subtitle, icon, trend, progress, iconColor }: any) {
+function StatCard({ title, value, subtitle, icon, trend, progress, iconColor = "text-blue-600" }: any) {
   return (
-    <div className="bg-white border border-slate-200 rounded-[32px] p-6 hover:border-blue-200 transition-all group shadow-sm flex flex-col sm:flex-row items-center gap-4 md:gap-6">
-      <div className={`p-4 bg-slate-50 rounded-2xl group-hover:bg-blue-600 group-hover:text-white transition-all group-hover:scale-110 ${iconColor}`}>
-        {icon}
-      </div>
-      <div className="text-center sm:text-left">
-        <div className="flex items-center justify-center sm:justify-start gap-2 mb-1">
-          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">{title}</span>
-          {trend && <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-600 text-[8px] font-black rounded shadow-sm">{trend}</span>}
+    <div className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm hover:shadow-md transition-all flex flex-col justify-between group h-full">
+      <div className="flex justify-between items-start mb-4">
+        <div className={`p-3 rounded-2xl bg-slate-50 ${iconColor} group-hover:bg-blue-600 group-hover:text-white transition-all group-hover:scale-110 shadow-sm`}>
+          {icon}
         </div>
-        <div className="flex items-baseline justify-center sm:justify-start gap-2">
-          <h4 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tighter leading-none">{value}</h4>
-          {subtitle && <span className="text-slate-400 text-[10px] font-bold">{subtitle}</span>}
-        </div>
+        {trend && (
+          <span className={`text-[9px] font-black px-2 py-1 rounded-lg ${trend.includes('+') || trend === 'Excelente' || trend === 'OK' ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'}`}>
+            {trend}
+          </span>
+        )}
       </div>
+      
+      <div>
+        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 leading-tight">{title}</h3>
+        <div className="flex items-baseline gap-2">
+          <span className="text-2xl font-black text-slate-900 tracking-tight">{value}</span>
+        </div>
+        {subtitle && <p className="text-[9px] text-slate-400 font-bold mt-1 line-clamp-1">{subtitle}</p>}
+      </div>
+
+      {progress !== undefined && (
+        <div className="mt-4 pt-4 border-t border-slate-50">
+          <div className="flex justify-between text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+            <span>Taxa</span>
+            <span>{progress}%</span>
+          </div>
+          <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
+            <motion.div 
+              initial={{ width: 0 }}
+              animate={{ width: `${progress}%` }}
+              className={`h-full rounded-full ${progress > 10 ? 'bg-emerald-500' : 'bg-blue-500'}`}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
