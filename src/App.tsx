@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, FormEvent } from 'react';
+import { useState, useEffect, useCallback, FormEvent, ChangeEvent } from 'react';
 import { 
   LineChart, 
   Line, 
@@ -41,7 +41,10 @@ import {
   Lock,
   MousePointer2,
   Target,
-  Copy
+  Copy,
+  Contact2,
+  ListChecks,
+  Save
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
@@ -68,14 +71,28 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'mail' | 'dns' | 'accounts' | 'logs' | 'settings' | 'campaigns'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'mail' | 'dns' | 'accounts' | 'logs' | 'settings' | 'campaigns' | 'lists'>('overview');
+  const [activeMailFolder, setActiveMailFolder] = useState<'inbox' | 'sent' | 'drafts' | 'trash'>('inbox');
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [editAccount, setEditAccount] = useState<any>(null);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [isRelayModalOpen, setIsRelayModalOpen] = useState(false);
   const [isCampaignModalOpen, setIsCampaignModalOpen] = useState(false);
+  const [isListModalOpen, setIsListModalOpen] = useState(false);
   const [selectedEmail, setSelectedEmail] = useState<any>(null);
   const [accounts, setAccounts] = useState<MailAccount[]>([]);
+  const [filterAccount, setFilterAccount] = useState<string>('all');
+  const [emailLists, setEmailLists] = useState<any[]>([]);
+  const [newCampaignFormData, setNewCampaignFormData] = useState<any>({
+    name: '',
+    from: '',
+    subject: '',
+    body: '',
+    recipients: '',
+    delay: 2,
+    scheduledAt: '',
+    selectedListId: ''
+  });
   const [isFetchingAccounts, setIsFetchingAccounts] = useState(false);
   const [logs, setLogs] = useState<any[]>([]);
   const [campaigns, setCampaigns] = useState<any[]>([]);
@@ -196,15 +213,29 @@ export default function App() {
     }
   };
 
-  const fetchEmails = useCallback(async () => {
+  const fetchEmailLists = useCallback(async () => {
     try {
-      const res = await fetch('/api/mail/inbox');
+      const res = await fetch('/api/email-lists');
+      const data = await res.json();
+      setEmailLists(data);
+    } catch (err) {
+      console.error('Erro ao buscar listas de emails:', err);
+    }
+  }, []);
+
+  const fetchEmails = useCallback(async (folder: string = 'inbox') => {
+    try {
+      let url = `/api/mail/${folder}`;
+      if (currentUser?.email && currentUser.role !== 'admin') {
+        url += `?userEmail=${encodeURIComponent(currentUser.email)}`;
+      }
+      const res = await fetch(url);
       const data = await res.json();
       setEmails(data);
     } catch (err) {
       console.error('Erro ao buscar emails:', err);
     }
-  }, []);
+  }, [currentUser?.email, currentUser?.role]);
 
   const fetchLogs = useCallback(async () => {
     try {
@@ -229,13 +260,31 @@ export default function App() {
     }
   }, []);
 
+  const deleteEmail = async (folder: string, id: string) => {
+    try {
+      const res = await fetch(`/api/mail/${folder}/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        if (selectedEmail?.id === id) setSelectedEmail(null);
+        fetchEmails(folder);
+      } else {
+        alert('Erro ao excluir mensagem');
+      }
+    } catch (err) {
+      alert('Erro de conexão');
+    }
+  };
+
   const fetchAccounts = useCallback(async () => {
     setIsFetchingAccounts(true);
     try {
-      const res = await fetch('/api/accounts');
+      let url = '/api/accounts';
+      if (currentUser?.email && currentUser.role !== 'admin') {
+        url += `?userEmail=${encodeURIComponent(currentUser.email)}`;
+      }
+      const res = await fetch(url);
       const data = await res.json();
       setAccounts(data || []);
-      if (data) {
+      if (data && currentUser?.role === 'admin') {
         setStats(prev => prev ? { ...prev, activeAccounts: data.length } : null);
       }
     } catch (err) {
@@ -243,12 +292,16 @@ export default function App() {
     } finally {
       setIsFetchingAccounts(false);
     }
-  }, []);
+  }, [currentUser?.email, currentUser?.role]);
 
   useEffect(() => {
     const savedUser = localStorage.getItem('zima_user');
     if (savedUser) {
-      setCurrentUser(JSON.parse(savedUser));
+      const user = JSON.parse(savedUser);
+      setCurrentUser(user);
+      if (user.role !== 'admin') {
+        setActiveTab('mail');
+      }
     }
 
     fetch('/api/stats')
@@ -258,6 +311,10 @@ export default function App() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
+  }, []); // Run only once on mount
+
+  useEffect(() => {
+    if (!currentUser) return;
 
     fetchAccounts();
     fetchEmails();
@@ -266,6 +323,7 @@ export default function App() {
     fetchDomains();
     fetchRelays();
     fetchCampaigns();
+    fetchEmailLists();
 
     const interval = setInterval(() => {
       fetchEmails();
@@ -276,7 +334,7 @@ export default function App() {
     }, 10000); 
 
     return () => clearInterval(interval);
-  }, [fetchAccounts, fetchEmails, fetchLogs, fetchSettings, fetchDomains, fetchRelays, fetchCampaigns]);
+  }, [currentUser?.id, fetchAccounts, fetchEmails, fetchLogs, fetchSettings, fetchDomains, fetchRelays, fetchCampaigns, fetchEmailLists]);
 
   const handleDeleteAccount = async (id: string) => {
     if (!supabase) return;
@@ -460,8 +518,11 @@ export default function App() {
     return <Login onLogin={(user) => { 
       setCurrentUser(user);
       localStorage.setItem('zima_user', JSON.stringify(user));
+      if (user.role !== 'admin') setActiveTab('mail');
     }} />;
   }
+
+  const isAdmin = currentUser?.role === 'admin';
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-500/30">
@@ -472,48 +533,60 @@ export default function App() {
         </div>
         
         <div className="flex flex-col gap-6">
-          <NavButton 
-            active={activeTab === 'overview'} 
-            onClick={() => setActiveTab('overview')}
-            icon={<LayoutDashboard className="w-6 h-6" />}
-            label="Dashboard"
-          />
+          {isAdmin && (
+            <NavButton 
+              active={activeTab === 'overview'} 
+              onClick={() => setActiveTab('overview')}
+              icon={<LayoutDashboard className="w-6 h-6" />}
+              label="Dashboard"
+            />
+          )}
           <NavButton 
             active={activeTab === 'mail'} 
             onClick={() => setActiveTab('mail')}
             icon={<Mail className="w-6 h-6" />}
             label="Emails"
           />
-          <NavButton 
-            active={activeTab === 'dns'} 
-            onClick={() => setActiveTab('dns')}
-            icon={<Globe className="w-6 h-6" />}
-            label="Domínios"
-          />
-          <NavButton 
-            active={activeTab === 'campaigns'} 
-            onClick={() => setActiveTab('campaigns')}
-            icon={<Zap className="w-6 h-6" />}
-            label="Campanhas"
-          />
-          <NavButton 
-            active={activeTab === 'accounts'} 
-            onClick={() => setActiveTab('accounts')}
-            icon={<Users className="w-6 h-6" />}
-            label="Accounts"
-          />
-          <NavButton 
-            active={activeTab === 'logs'} 
-            onClick={() => setActiveTab('logs')}
-            icon={<Activity className="w-6 h-6" />}
-            label="Logs"
-          />
-          <NavButton 
-            active={activeTab === 'settings'} 
-            onClick={() => setActiveTab('settings')}
-            icon={<Settings className="w-6 h-6" />}
-            label="Ajustes"
-          />
+          {isAdmin && (
+            <>
+              <NavButton 
+                active={activeTab === 'dns'} 
+                onClick={() => setActiveTab('dns')}
+                icon={<Globe className="w-6 h-6" />}
+                label="Domínios"
+              />
+              <NavButton 
+                active={activeTab === 'campaigns'} 
+                onClick={() => setActiveTab('campaigns')}
+                icon={<Zap className="w-6 h-6" />}
+                label="Campanhas"
+              />
+              <NavButton 
+                active={activeTab === 'lists'} 
+                onClick={() => setActiveTab('lists')}
+                icon={<Contact2 className="w-6 h-6" />}
+                label="Listas"
+              />
+              <NavButton 
+                active={activeTab === 'accounts'} 
+                onClick={() => setActiveTab('accounts')}
+                icon={<Users className="w-6 h-6" />}
+                label="Contas"
+              />
+              <NavButton 
+                active={activeTab === 'logs'} 
+                onClick={() => setActiveTab('logs')}
+                icon={<Activity className="w-6 h-6" />}
+                label="Logs"
+              />
+              <NavButton 
+                active={activeTab === 'settings'} 
+                onClick={() => setActiveTab('settings')}
+                icon={<Settings className="w-6 h-6" />}
+                label="Ajustes"
+              />
+            </>
+          )}
         </div>
 
         <div className="mt-auto flex flex-col items-center gap-4 mb-4">
@@ -534,32 +607,43 @@ export default function App() {
       </nav>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-around items-center h-16 z-50 px-2 pb-safe">
-        <MobileNavButton 
-          active={activeTab === 'overview'} 
-          onClick={() => setActiveTab('overview')}
-          icon={<LayoutDashboard className="w-5 h-5" />}
-        />
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-around items-center h-16 z-50 px-2 pb-safe shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
+        {isAdmin && (
+          <MobileNavButton 
+            active={activeTab === 'overview'} 
+            onClick={() => setActiveTab('overview')}
+            icon={<LayoutDashboard className="w-5 h-5" />}
+          />
+        )}
         <MobileNavButton 
           active={activeTab === 'mail'} 
           onClick={() => setActiveTab('mail')}
           icon={<Mail className="w-5 h-5" />}
         />
-        <MobileNavButton 
-          active={activeTab === 'dns'} 
-          onClick={() => setActiveTab('dns')}
-          icon={<Globe className="w-5 h-5" />}
-        />
-        <MobileNavButton 
-          active={activeTab === 'campaigns'} 
-          onClick={() => setActiveTab('campaigns')}
-          icon={<Zap className="w-5 h-5" />}
-        />
-        <MobileNavButton 
-          active={activeTab === 'settings'} 
-          onClick={() => setActiveTab('settings')}
-          icon={<Settings className="w-5 h-5" />}
-        />
+        {isAdmin && (
+          <>
+            <MobileNavButton 
+              active={activeTab === 'dns'} 
+              onClick={() => setActiveTab('dns')}
+              icon={<Globe className="w-5 h-5" />}
+            />
+            <MobileNavButton 
+              active={activeTab === 'campaigns'} 
+              onClick={() => setActiveTab('campaigns')}
+              icon={<Zap className="w-5 h-5" />}
+            />
+            <MobileNavButton 
+              active={activeTab === 'lists'} 
+              onClick={() => setActiveTab('lists')}
+              icon={<Contact2 className="w-5 h-5" />}
+            />
+            <MobileNavButton 
+              active={activeTab === 'settings'} 
+              onClick={() => setActiveTab('settings')}
+              icon={<Settings className="w-5 h-5" />}
+            />
+          </>
+        )}
       </nav>
 
       {/* Main Content */}
@@ -567,28 +651,30 @@ export default function App() {
         <header className="p-4 md:p-8 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white/80 backdrop-blur-xl sticky top-0 z-40">
           <div>
             <h1 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900 flex items-center flex-wrap gap-2">
-              <Server className="w-6 h-6 text-blue-600" />
-              ZimaMail Provider
-              <span className="text-[10px] bg-emerald-500/10 text-emerald-600 px-2 py-0.5 rounded-full border border-emerald-500/20 font-medium uppercase tracking-widest">
-                Production
+              <Mail className="w-6 h-6 text-blue-600" />
+              {isAdmin ? 'ZimaMail Provider' : 'ZimaMail Webmail'}
+              <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium uppercase tracking-widest ${isAdmin ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' : 'bg-blue-500/10 text-blue-600 border-blue-500/20'}`}>
+                {isAdmin ? 'Admin' : 'User'}
               </span>
             </h1>
-            <p className="text-slate-500 text-xs md:text-sm mt-1">Infraestrutura gerenciada por Docker no ZimaOS</p>
+            <p className="text-slate-500 text-xs md:text-sm mt-1">{isAdmin ? 'Infraestrutura gerenciada' : `Logado como: ${currentUser.email}`}</p>
           </div>
 
-          <div className="flex gap-2 md:gap-4 w-full sm:w-auto">
-            <button onClick={() => setActiveTab('logs')} className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 rounded-lg border border-slate-200 text-xs md:text-sm font-medium transition-all shadow-sm">
-              Logs
-            </button>
-            <button onClick={() => setIsAccountModalOpen(true)} className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs md:text-sm font-medium transition-all shadow-lg shadow-blue-500/10 whitespace-nowrap">
-              Nova Conta
-            </button>
-          </div>
+          {isAdmin && (
+            <div className="flex gap-2 md:gap-4 w-full sm:w-auto">
+              <button onClick={() => setActiveTab('logs')} className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 rounded-lg border border-slate-200 text-xs md:text-sm font-medium transition-all shadow-sm">
+                Logs
+              </button>
+              <button onClick={() => setIsAccountModalOpen(true)} className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs md:text-sm font-medium transition-all shadow-lg shadow-blue-500/10 whitespace-nowrap">
+                Nova Conta
+              </button>
+            </div>
+          )}
         </header>
 
         <section className="p-4 md:p-8 max-w-7xl mx-auto">
           <AnimatePresence mode="wait">
-            {activeTab === 'overview' && (
+            {activeTab === 'overview' && isAdmin && (
               <motion.div 
                 key="overview"
                 initial={{ opacity: 0, y: 10 }}
@@ -805,40 +891,43 @@ export default function App() {
                     </div>
 
                     {/* Quota Management */}
-                    <div className="bg-white border border-slate-200 rounded-[48px] p-10 shadow-sm">
-                      <div className="flex justify-between items-center mb-10">
-                        <div>
-                          <h3 className="text-2xl font-black text-slate-900 tracking-tight">Status de Cotas</h3>
-                          <p className="text-[11px] text-slate-400 font-black uppercase tracking-widest mt-1">Limites SMTP ativos</p>
-                        </div>
-                        <Server className="w-6 h-6 text-slate-200" />
-                      </div>
-                      <div className="space-y-10">
-                        {relays.map((relay) => {
-                          const quota = relay.quota || 1000;
-                          const sent = relay.sent || 0;
-                          const perc = Math.min(100, Math.round((sent / quota) * 100));
-                          return (
-                            <div key={relay.id} className="space-y-4">
-                              <div className="flex justify-between items-end">
-                                <div>
-                                  <h5 className="text-xs font-black text-slate-900 uppercase tracking-widest mb-1 truncate max-w-[180px]">{relay.name || relay.host}</h5>
-                                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{sent.toLocaleString()} / {quota.toLocaleString()}</p>
-                                </div>
-                                <span className={`text-sm font-black tracking-tighter ${perc > 90 ? 'text-red-500' : 'text-blue-600'}`}>{perc}%</span>
-                              </div>
-                              <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden p-0.5">
-                                <motion.div 
-                                  initial={{ width: 0 }}
-                                  animate={{ width: `${perc}%` }}
-                                  className={`h-full rounded-full transition-all duration-1000 ${perc > 90 ? 'bg-red-500' : 'bg-blue-600'}`}
-                                />
-                              </div>
+                      {relays.some(r => r.apiKey) && (
+                        <div className="bg-white border border-slate-200 rounded-[48px] p-10 shadow-sm">
+                          <div className="flex justify-between items-center mb-10">
+                            <div>
+                              <h3 className="text-2xl font-black text-slate-900 tracking-tight">Status de Cotas</h3>
+                              <p className="text-[11px] text-slate-400 font-black uppercase tracking-widest mt-1">Limites SMTP ativos</p>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </div>
+                            <Server className="w-6 h-6 text-slate-200" />
+                          </div>
+                          <div className="space-y-10">
+                            {relays.map((relay) => {
+                              if (!relay.apiKey) return null;
+                              const quota = relay.quota || 1000;
+                              const sent = relay.sent || 0;
+                              const perc = Math.min(100, Math.round((sent / quota) * 100));
+                              return (
+                                <div key={relay.id} className="space-y-4">
+                                  <div className="flex justify-between items-end">
+                                    <div>
+                                      <h5 className="text-xs font-black text-slate-900 uppercase tracking-widest mb-1 truncate max-w-[180px]">{relay.name || relay.host}</h5>
+                                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{sent.toLocaleString()} / {quota.toLocaleString()}</p>
+                                    </div>
+                                    <span className={`text-sm font-black tracking-tighter ${perc > 90 ? 'text-red-500' : 'text-blue-600'}`}>{perc}%</span>
+                                  </div>
+                                  <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden p-0.5">
+                                    <motion.div 
+                                      initial={{ width: 0 }}
+                                      animate={{ width: `${perc}%` }}
+                                      className={`h-full rounded-full transition-all duration-1000 ${perc > 90 ? 'bg-red-500' : 'bg-blue-600'}`}
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
 
                     {/* Relay Gateway */}
                     <div className="bg-white border border-slate-200 rounded-[48px] p-10 shadow-sm">
@@ -936,30 +1025,88 @@ export default function App() {
                   </button>
                   
                   <nav className="space-y-1">
-                    <MailFolderItem label="Entrada" count={emails.filter(e => !e.read).length} active icon={<Mail className="w-4 h-4" />} />
-                    <MailFolderItem label="Enviados" icon={<ArrowRight className="w-4 h-4" rotate={-45} />} />
-                    <MailFolderItem label="Rascunhos" icon={<Shield className="w-4 h-4" />} />
-                    <MailFolderItem label="Lixeira" icon={<AlertCircle className="w-4 h-4" />} />
+                    <MailFolderItem 
+                      label="Entrada" 
+                      count={activeMailFolder === 'inbox' ? emails.filter(e => !e.read).length : undefined} 
+                      active={activeMailFolder === 'inbox'} 
+                      icon={<Mail className="w-4 h-4" />} 
+                      onClick={() => { setActiveMailFolder('inbox'); fetchEmails('inbox'); }}
+                    />
+                    <MailFolderItem 
+                      label="Enviados" 
+                      active={activeMailFolder === 'sent'} 
+                      icon={<ArrowRight className="w-4 h-4" rotate={-45} />} 
+                      onClick={() => { setActiveMailFolder('sent'); fetchEmails('sent'); }}
+                    />
+                    <MailFolderItem 
+                      label="Rascunhos" 
+                      active={activeMailFolder === 'drafts'} 
+                      icon={<Shield className="w-4 h-4" />} 
+                      onClick={() => { setActiveMailFolder('drafts'); fetchEmails('drafts'); }}
+                    />
+                    <MailFolderItem 
+                      label="Lixeira" 
+                      active={activeMailFolder === 'trash'} 
+                      icon={<AlertCircle className="w-4 h-4" />} 
+                      onClick={() => { setActiveMailFolder('trash'); fetchEmails('trash'); }}
+                    />
                   </nav>
                 </div>
 
                 {/* Email List */}
                 <div className={`${selectedEmail ? 'hidden lg:block' : 'block'} lg:col-span-4 border-r border-slate-100 overflow-y-auto max-h-[700px]`}>
-                  {emails.length === 0 && (
+                  {isAdmin && (
+                    <div className="p-4 border-b border-slate-100">
+                      <select value={filterAccount} onChange={e => setFilterAccount(e.target.value)} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-600">
+                        <option value="all">Todas as Contas</option>
+                        {accounts.map(acc => <option key={acc.id} value={acc.email}>{acc.email}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {emails.filter(email => {
+                    if (filterAccount === 'all') return true;
+                    const from = email.from || email.from_addr || '';
+                    return from === filterAccount;
+                  }).length === 0 && (
                     <div className="py-20 text-center text-slate-400">
                       <Mail className="w-12 h-12 mx-auto mb-4 opacity-10" />
                       <p className="text-sm font-bold uppercase tracking-widest">Caixa vazia</p>
                     </div>
                   )}
-                  {emails.map(email => (
+                  {emails.filter(email => {
+                    if (filterAccount === 'all') return true;
+                    const from = email.from || email.from_addr || '';
+                    return from === filterAccount;
+                  }).map(email => (
                     <button 
                       key={email.id}
-                      onClick={() => setSelectedEmail(email)}
+                      onClick={async () => {
+                        setSelectedEmail(email);
+                        if (!email.read) {
+                           await fetch(`/api/mail/mark-read/${email.id}`, { method: 'POST' });
+                           fetchEmails(activeMailFolder);
+                        }
+                        const trackingIdMatch = email.body?.match(/src="([^"]*\/api\/track\/[^"]*)"/);
+                        if (trackingIdMatch && !email.opened) {
+                          fetch(trackingIdMatch[1]);
+                        }
+                      }}
                       className={`w-full p-4 border-b border-slate-50 text-left hover:bg-slate-50 transition-colors ${selectedEmail?.id === email.id ? 'bg-blue-50/50 border-l-4 border-l-blue-600' : ''}`}
                     >
                       <div className="flex justify-between items-center mb-1">
                         <span className={`text-sm ${!email.read ? 'font-bold text-slate-900' : 'text-slate-600'}`}>{email.from_addr || email.from}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{new Date(email.received_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-400 font-mono">{new Date(email.received_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (confirm('Deseja mover para a lixeira?')) deleteEmail(activeMailFolder, email.id);
+                            }}
+                            className="p-1 hover:bg-red-50 text-slate-300 hover:text-red-500 rounded transition-colors"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
                       <p className={`text-xs truncate ${!email.read ? 'font-bold text-slate-800' : 'text-slate-500'}`}>{email.subject}</p>
                       <p className="text-[10px] text-slate-400 truncate mt-1">{email.body?.replace(/<[^>]*>/g, '').substring(0, 100)}</p>
@@ -987,6 +1134,17 @@ export default function App() {
                           </div>
                         </div>
                         <div className="flex gap-2 w-full md:w-auto">
+                          <button 
+                            onClick={() => {
+                              if (confirm('Deseja excluir permanentemente?') || (activeMailFolder !== 'trash' && confirm('Mover para lixeira?'))) {
+                                deleteEmail(activeMailFolder, selectedEmail.id);
+                              }
+                            }}
+                            className="flex-1 md:flex-none p-2 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-500 border md:border-none flex justify-center"
+                            title="Excluir"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                           <button className="flex-1 md:flex-none p-2 hover:bg-slate-100 rounded-lg text-slate-400 border md:border-none flex justify-center"><ArrowRight className="w-4 h-4" /></button>
                           <button className="flex-1 md:flex-none p-2 hover:bg-slate-100 rounded-lg text-slate-400 border md:border-none flex justify-center"><Shield className="w-4 h-4" /></button>
                         </div>
@@ -1004,8 +1162,8 @@ export default function App() {
             )}
 
 
-            {activeTab === 'campaigns' && renderCampaigns()}
-            {activeTab === 'dns' && (
+            {activeTab === 'campaigns' && isAdmin && renderCampaigns()}
+            {activeTab === 'dns' && isAdmin && (
               <motion.div 
                 key="dns"
                 initial={{ opacity: 0, y: 10 }}
@@ -1275,7 +1433,72 @@ export default function App() {
               </motion.div>
             )}
 
-            {activeTab === 'accounts' && (
+            {/* Email Lists Management UI */}
+            {activeTab === 'lists' && isAdmin && (
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-8">
+                <div className="flex justify-between items-center mb-10">
+                  <div>
+                    <h2 className="text-3xl font-black text-slate-800 tracking-tight">Listas de Emails</h2>
+                    <p className="text-sm text-slate-400 font-bold uppercase tracking-widest mt-1">Gerencie seus nichos e contatos salvos</p>
+                  </div>
+                  <button 
+                    onClick={() => setIsListModalOpen(true)}
+                    className="flex items-center gap-3 bg-blue-600 text-white px-6 py-4 rounded-2xl font-black text-xs tracking-widest uppercase hover:scale-105 active:scale-95 transition-all shadow-xl shadow-blue-500/20"
+                  >
+                    <Plus className="w-5 h-5" />
+                    Criar Nova Lista
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {emailLists.length === 0 && (
+                    <div className="col-span-full py-20 text-center bg-white/50 rounded-3xl border-2 border-dashed border-slate-200">
+                      <Contact2 className="w-12 h-12 mx-auto mb-4 text-slate-300" />
+                      <p className="font-bold text-slate-500">Nenhuma lista criada ainda.</p>
+                      <button onClick={() => setIsListModalOpen(true)} className="text-blue-600 font-black text-xs uppercase mt-2 hover:underline">Comece criando sua primeira lista aqui</button>
+                    </div>
+                  )}
+                  {emailLists.map(list => (
+                    <div key={list.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl transition-all group">
+                      <div className="flex justify-between items-start mb-4">
+                        <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600">
+                          <ListChecks className="w-6 h-6" />
+                        </div>
+                        <button 
+                          onClick={async () => {
+                            if (confirm('Deletar esta lista permanentemente?')) {
+                              await fetch(`/api/email-lists/${list.id}`, { method: 'DELETE' });
+                              fetchEmailLists();
+                            }
+                          }}
+                          className="p-2 hover:bg-red-50 text-slate-300 hover:text-red-500 rounded-xl transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <h3 className="font-black text-slate-800 text-lg mb-1">{list.name}</h3>
+                      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-4">{list.count} contatos</p>
+                      
+                      <div className="flex items-center justify-between pt-4 border-t border-slate-50">
+                        <span className="text-[10px] text-slate-300 font-mono">{new Date(list.createdAt).toLocaleDateString()}</span>
+                        <button 
+                          onClick={() => {
+                            // Pre-fill campaign modal with this list
+                            setNewCampaignFormData(prev => ({ ...prev, recipients: list.recipients.map((r: any) => `${r.email};${r.name}`).join('\n') }));
+                            setIsCampaignModalOpen(true);
+                          }}
+                          className="text-[10px] text-blue-600 font-black uppercase tracking-widest hover:underline"
+                        >
+                          Usar em Campanha
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'accounts' && isAdmin && (
               <motion.div 
                 key="accounts"
                 initial={{ opacity: 0, x: 20 }}
@@ -1401,7 +1624,7 @@ export default function App() {
               </motion.div>
             )}
 
-            {activeTab === 'logs' && (
+            {activeTab === 'logs' && isAdmin && (
               <motion.div 
                 key="logs"
                 initial={{ opacity: 0, scale: 0.98 }}
@@ -1462,7 +1685,7 @@ export default function App() {
               </motion.div>
             )}
 
-            {activeTab === 'settings' && (
+            {activeTab === 'settings' && isAdmin && (
               <motion.div 
                 key="settings"
                 initial={{ opacity: 0, y: 10 }}
@@ -1765,6 +1988,12 @@ export default function App() {
         domains={domains}
         editAccount={editAccount}
       />
+      {/* Modal Nova Lista */}
+      <NewListModal 
+        isOpen={isListModalOpen} 
+        onClose={() => setIsListModalOpen(false)} 
+        onSuccess={fetchEmailLists} 
+      />
       <RelayModal 
         isOpen={isRelayModalOpen} 
         onClose={() => {
@@ -1776,9 +2005,14 @@ export default function App() {
       />
       <CampaignModal 
         isOpen={isCampaignModalOpen} 
-        onClose={() => setIsCampaignModalOpen(false)} 
+        onClose={() => {
+          setIsCampaignModalOpen(false);
+          setNewCampaignFormData({ name: '', from: accounts[0]?.email || '', subject: '', body: '', recipients: '', delay: 2, scheduledAt: '', selectedListId: '' });
+        }}
         onSuccess={fetchCampaigns}
         accounts={accounts}
+        emailLists={emailLists}
+        initialData={newCampaignFormData}
       />
 
       <CampaignDetailsModal 
@@ -1835,16 +2069,16 @@ function NavButton({ active, icon, label, onClick }: { active: boolean, icon: an
   );
 }
 
-function MailFolderItem({ label, count, active, icon }: { label: string, count?: number, active?: boolean, icon: any }) {
+function MailFolderItem({ label, count, active, icon, onClick }: { label: string, count?: number, active?: boolean, icon: any, onClick: () => void }) {
   return (
-    <button className={`w-full flex items-center justify-between p-2 rounded-lg text-sm transition-all ${
+    <button onClick={onClick} className={`w-full flex items-center justify-between p-2 rounded-lg text-sm transition-all ${
       active ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-600 hover:bg-slate-100'
     }`}>
       <div className="flex items-center gap-2">
         {icon}
         {label}
       </div>
-      {count && <span className="text-[10px] bg-blue-100 text-blue-700 font-bold px-1.5 py-0.5 rounded-full">{count}</span>}
+      {count !== undefined && <span className="text-[10px] bg-blue-100 text-blue-700 font-bold px-1.5 py-0.5 rounded-full">{count}</span>}
     </button>
   );
 }
@@ -1992,7 +2226,6 @@ function RelayModal({ isOpen, onClose, onSuccess, initialData }: { isOpen: boole
     port: '587',
     user: '',
     pass: '',
-    quota: '1000',
     apiKey: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -2005,11 +2238,10 @@ function RelayModal({ isOpen, onClose, onSuccess, initialData }: { isOpen: boole
         port: initialData.port || '587',
         user: initialData.user || '',
         pass: initialData.pass || '',
-        quota: String(initialData.quota || '1000'),
         apiKey: initialData.apiKey || ''
       });
     } else {
-      setFormData({ name: '', host: '', port: '587', user: '', pass: '', quota: '1000', apiKey: '' });
+      setFormData({ name: '', host: '', port: '587', user: '', pass: '', apiKey: '' });
     }
   }, [initialData, isOpen]);
 
@@ -2026,8 +2258,7 @@ function RelayModal({ isOpen, onClose, onSuccess, initialData }: { isOpen: boole
         method: method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...formData,
-          quota: parseInt(formData.quota) || 1000
+          ...formData
         })
       });
       if (res.ok) {
@@ -2096,17 +2327,6 @@ function RelayModal({ isOpen, onClose, onSuccess, initialData }: { isOpen: boole
                   value={formData.port}
                   onChange={e => setFormData({ ...formData, port: e.target.value })}
                   placeholder="587" 
-                  className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 text-sm transition-all text-center font-mono" 
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="block text-xs font-black text-slate-400 uppercase ml-1">Quota (Envios)</label>
-                <input 
-                  required
-                  type="number" 
-                  value={formData.quota}
-                  onChange={e => setFormData({ ...formData, quota: e.target.value })}
-                  placeholder="1000" 
                   className="w-full p-4 bg-slate-50 rounded-2xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 text-sm transition-all text-center font-mono" 
                 />
               </div>
@@ -2180,7 +2400,134 @@ function RelayModal({ isOpen, onClose, onSuccess, initialData }: { isOpen: boole
   );
 }
 
-function CampaignModal({ isOpen, onClose, onSuccess, accounts }: { isOpen: boolean, onClose: () => void, onSuccess: () => void, accounts: any[] }) {
+// Modal Nova Lista
+function NewListModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: () => void, onSuccess: () => void }) {
+  const [name, setName] = useState('');
+  const [recipients, setRecipients] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (!isOpen) return null;
+
+  const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setRecipients(event.target?.result as string);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    try {
+      const recipientList = recipients
+        .split('\n')
+        .map(line => {
+          if (!line.trim()) return null;
+          const separator = line.includes(';') ? ';' : ',';
+          const parts = line.split(separator).map(s => s.trim());
+          return { email: parts[0], name: parts[1] || parts[0].split('@')[0] };
+        })
+        .filter(r => r && r.email.includes('@'));
+
+      const res = await fetch('/api/email-lists', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, recipients: recipientList })
+      });
+
+      if (res.ok) {
+        onSuccess();
+        onClose();
+        setName('');
+        setRecipients('');
+      } else {
+        alert('Erro ao salvar lista');
+      }
+    } catch (e) {
+      alert('Erro de conexão');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden">
+        <div className="p-10">
+          <div className="flex justify-between items-center mb-10">
+            <div>
+              <h2 className="text-3xl font-black text-slate-800 tracking-tight">Nova Lista</h2>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Defina um nicho e importe seus contatos</p>
+            </div>
+            <button onClick={onClose} className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-8">
+            <div className="space-y-2">
+              <label className="block text-xs font-black text-slate-400 uppercase ml-1">Nome da Lista (Ex: Clientes VIP, Leads Marketing)</label>
+              <input 
+                required
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="Nome curto e descritivo"
+                className="w-full p-5 bg-slate-50 rounded-3xl border border-slate-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold"
+              />
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex justify-between items-center px-1">
+                <label className="block text-xs font-black text-slate-400 uppercase">Emails dos Contatos</label>
+                <label className="text-[10px] text-blue-600 font-black uppercase tracking-widest cursor-pointer hover:bg-blue-50 px-2 py-1 rounded transition-colors">
+                  Importar CSV/TXT
+                  <input type="file" accept=".csv,.txt" onChange={handleFileUpload} className="hidden" />
+                </label>
+              </div>
+              <textarea 
+                required
+                value={recipients}
+                onChange={e => setRecipients(e.target.value)}
+                placeholder="vendedor@empresa.com;João&#10;compras@loja.com;Maria"
+                className="w-full p-6 bg-slate-50 rounded-3xl border border-slate-200 h-48 focus:ring-4 focus:ring-blue-500/10 transition-all font-mono text-sm leading-relaxed"
+              />
+            </div>
+
+            <div className="flex gap-4 pt-4">
+              <button 
+                type="button"
+                onClick={onClose}
+                className="flex-1 py-4 text-slate-400 font-black text-xs tracking-widest uppercase hover:bg-slate-50 rounded-2xl transition-all"
+              >
+                Cancelar
+              </button>
+              <button 
+                type="submit"
+                disabled={isSubmitting}
+                className="flex-3 py-4 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-500/30 active:scale-95 transition-all text-xs tracking-widest uppercase flex items-center justify-center gap-3"
+              >
+                {isSubmitting ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                Salvar Lista de Emails
+              </button>
+            </div>
+          </form>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function CampaignModal({ isOpen, onClose, onSuccess, accounts, emailLists, initialData }: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  onSuccess: () => void, 
+  accounts: any[],
+  emailLists: any[],
+  initialData?: any
+}) {
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
     name: '',
@@ -2188,24 +2535,63 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts }: { isOpen: boole
     subject: '',
     body: '',
     recipients: '',
-    delay: 2 // default 2 seconds
+    delay: 2,
+    scheduledAt: '',
+    selectedListId: ''
   });
+
+  useEffect(() => {
+    if (isOpen && initialData) {
+      setFormData(prev => ({ 
+        ...prev, 
+        ...initialData,
+        from: initialData.from || accounts[0]?.email || ''
+      }));
+    }
+  }, [isOpen, initialData, accounts]);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
+
+  const handleListChange = (listId: string) => {
+    const list = emailLists.find(l => l.id === listId);
+    if (list) {
+      const recipientsString = list.recipients.map((r: any) => `${r.email};${r.name}`).join('\n');
+      setFormData(prev => ({ ...prev, selectedListId: listId, recipients: recipientsString }));
+    } else {
+      setFormData(prev => ({ ...prev, selectedListId: '', recipients: '' }));
+    }
+  };
+
+  const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      setFormData(prev => ({ ...prev, recipients: content }));
+    };
+    reader.readAsText(file);
+  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      // Parsing recipients: Email;Name or just Email
       const recipientList = formData.recipients
         .split('\n')
         .map(line => {
-          const [email, name] = line.split(';').map(s => s.trim());
-          return { email, name: name || email.split('@')[0] };
+          if (!line.trim()) return null;
+          // Support CSV (semicolon or comma)
+          const separator = line.includes(';') ? ';' : ',';
+          const parts = line.split(separator).map(s => s.trim());
+          const email = parts[0];
+          const name = parts[1] || email.split('@')[0];
+          return { email, name };
         })
-        .filter(r => r.email.includes('@'));
+        .filter(r => r && r.email.includes('@'));
       
       const res = await fetch('/api/campaigns', {
         method: 'POST',
@@ -2216,14 +2602,15 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts }: { isOpen: boole
           subject: formData.subject,
           body: formData.body,
           recipients: recipientList,
-          delay: Number(formData.delay) * 1000 // Converter para ms
+          delay: Number(formData.delay) * 1000,
+          scheduledAt: formData.scheduledAt || null
         })
       });
 
       if (res.ok) {
         onSuccess();
         onClose();
-        setFormData({ name: '', from: accounts[0]?.email || '', subject: '', body: '', recipients: '' });
+        setFormData({ name: '', from: accounts[0]?.email || '', subject: '', body: '', recipients: '', delay: 2, scheduledAt: '' });
         setStep(1);
       } else {
         alert('Erro ao criar campanha.');
@@ -2287,25 +2674,51 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts }: { isOpen: boole
                       </select>
                     </div>
                  </div>
-                 <div className="space-y-1.5">
-                    <p className="text-[10px] text-slate-400 font-bold uppercase ml-1">Intervalo entre Envios (Segundos)</p>
-                    <input 
-                      required
-                      type="number"
-                      min="0"
-                      step="0.5"
-                      value={formData.delay}
-                      onChange={e => setFormData({...formData, delay: e.target.value})}
-                      placeholder="Ex: 2"
-                      className="w-full p-5 bg-slate-50 rounded-3xl border border-slate-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold"
-                    />
+                 <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] text-slate-400 font-bold uppercase ml-1">Intervalo (Segundos)</p>
+                      <input 
+                        required
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={formData.delay}
+                        onChange={e => setFormData({...formData, delay: e.target.value})}
+                        placeholder="Ex: 2"
+                        className="w-full p-5 bg-slate-50 rounded-3xl border border-slate-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] text-slate-400 font-bold uppercase ml-1">Agendar para (Opcional)</p>
+                      <input 
+                        type="datetime-local"
+                        value={formData.scheduledAt}
+                        onChange={e => setFormData({...formData, scheduledAt: e.target.value})}
+                        className="w-full p-5 bg-slate-50 rounded-3xl border border-slate-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold"
+                      />
+                    </div>
                  </div>
                </div>
 
                <div className="space-y-4">
                  <div className="flex justify-between items-center px-1">
                    <label className="block text-xs font-black text-slate-400 uppercase">Lista de Destinatários</label>
-                   <span className="text-[10px] text-blue-600 font-black uppercase tracking-widest cursor-help underline underline-offset-4 decoration-blue-200">Formato Suportado: email;nome</span>
+                   <div className="flex gap-4 items-center">
+                     <select 
+                       value={formData.selectedListId}
+                       onChange={e => handleListChange(e.target.value)}
+                       className="text-[10px] bg-white border border-slate-200 rounded px-2 py-1 font-black uppercase text-blue-600 focus:outline-none"
+                     >
+                       <option value="">-- Selecionar Lista Salva --</option>
+                       {emailLists.map(l => <option key={l.id} value={l.id}>{l.name} ({l.count} contatos)</option>)}
+                     </select>
+
+                     <label className="text-[10px] text-blue-600 font-black uppercase tracking-widest cursor-pointer hover:bg-blue-50 px-2 py-1 rounded transition-colors">
+                       Importar CSV/TXT
+                       <input type="file" accept=".csv,.txt" onChange={handleFileUpload} className="hidden" />
+                     </label>
+                     <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest cursor-help">Formato: email;nome</span>
+                   </div>
                  </div>
                  <textarea 
                    required
@@ -2317,7 +2730,7 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts }: { isOpen: boole
                  />
                  <div className="bg-blue-50 p-4 rounded-2xl flex items-center gap-4 border border-blue-100">
                     <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-blue-600 font-black text-[10px] border border-blue-200">?</div>
-                    <p className="text-[10px] text-blue-700 leading-relaxed font-medium">Use <b>email;nome</b> (um por linha) para personalizar sua mensagem com <b>&#123;&#123;name&#125;&#125;</b> e <b>&#123;&#123;email&#125;&#125;</b>.</p>
+                    <p className="text-[10px] text-blue-700 leading-relaxed font-medium">Use <b>email;nome</b> ou apenas o <b>email</b>. Personalize com <b>&#123;&#123;name&#125;&#125;</b>.</p>
                  </div>
                </div>
             </div>
@@ -2379,7 +2792,7 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts }: { isOpen: boole
                   className="px-12 py-4 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-500/30 active:scale-95 transition-all text-xs tracking-widest uppercase flex items-center gap-3 disabled:opacity-50"
                 >
                   {isSubmitting ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-                  Lançar Campanha AGORA
+                  {formData.scheduledAt ? 'Agendar Campanha' : 'Lançar Campanha AGORA'}
                 </button>
               )}
             </div>
@@ -2420,8 +2833,8 @@ function Login({ onLogin }: { onLogin: (user: any) => void }) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 selection:bg-blue-500/30">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(37,99,235,0.1),transparent_70%)] pointer-events-none" />
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 selection:bg-blue-500/30">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(37,99,235,0.05),transparent_70%)] pointer-events-none" />
       
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
@@ -2432,19 +2845,19 @@ function Login({ onLogin }: { onLogin: (user: any) => void }) {
           <div className="w-20 h-20 bg-blue-600 rounded-[32px] shadow-2xl shadow-blue-500/40 flex items-center justify-center mx-auto mb-6 transform -rotate-6">
             <Mail className="w-10 h-10 text-white" />
           </div>
-          <h1 className="text-4xl font-black text-white tracking-tight mb-2">ZimaMail</h1>
-          <p className="text-slate-400 font-medium">Painel Administrativo do Provedor</p>
+          <h1 className="text-4xl font-black text-slate-900 tracking-tight mb-2">ZimaMail</h1>
+          <p className="text-slate-500 font-medium">Painel Administrativo do Provedor</p>
         </div>
 
-        <div className="bg-white/5 backdrop-blur-xl rounded-[40px] border border-white/10 p-8 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-purple-600 to-blue-600" />
+        <div className="bg-white rounded-[40px] border border-slate-100 p-8 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-emerald-400 to-blue-600" />
           
           <form onSubmit={handleSubmit} className="space-y-6">
             {error && (
               <motion.div 
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 text-sm font-medium flex items-center gap-3"
+                className="p-4 bg-red-50 border border-red-100 rounded-2xl text-red-600 text-sm font-medium flex items-center gap-3"
               >
                 <AlertCircle className="w-5 h-5 flex-shrink-0" />
                 {error}
@@ -2452,22 +2865,22 @@ function Login({ onLogin }: { onLogin: (user: any) => void }) {
             )}
 
             <div className="space-y-1.5">
-              <label className="block text-xs font-black text-slate-500 uppercase ml-2 tracking-widest">E-mail</label>
+              <label className="block text-xs font-black text-slate-400 uppercase ml-2 tracking-widest">E-mail</label>
               <div className="relative">
                 <input 
                   required
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@zimamail.com"
-                  className="w-full p-5 bg-white/5 rounded-3xl border border-white/10 focus:border-blue-500/50 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none text-white font-medium"
+                  placeholder="Werikplaystore@gmail.com"
+                  className="w-full p-5 bg-slate-50 rounded-3xl border border-slate-200 focus:border-blue-500/50 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none text-slate-900 font-medium placeholder:text-slate-300"
                 />
-                <Mail className="absolute right-5 top-5 w-5 h-5 text-slate-600" />
+                <Mail className="absolute right-5 top-5 w-5 h-5 text-slate-300" />
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <label className="block text-xs font-black text-slate-500 uppercase ml-2 tracking-widest">Senha</label>
+              <label className="block text-xs font-black text-slate-400 uppercase ml-2 tracking-widest">Senha</label>
               <div className="relative">
                 <input 
                   required
@@ -2475,16 +2888,16 @@ function Login({ onLogin }: { onLogin: (user: any) => void }) {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full p-5 bg-white/5 rounded-3xl border border-white/10 focus:border-blue-500/50 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none text-white font-medium"
+                  className="w-full p-5 bg-slate-50 rounded-3xl border border-slate-200 focus:border-blue-500/50 focus:ring-4 focus:ring-blue-500/10 transition-all outline-none text-slate-900 font-medium placeholder:text-slate-300"
                 />
-                <Lock className="absolute right-5 top-5 w-5 h-5 text-slate-600" />
+                <Lock className="absolute right-5 top-5 w-5 h-5 text-slate-300" />
               </div>
             </div>
 
             <button 
               disabled={isSubmitting}
               type="submit"
-              className="w-full p-5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-3xl font-black text-sm uppercase tracking-widest shadow-xl shadow-blue-500/20 transition-all active:scale-95 flex items-center justify-center gap-3"
+              className="w-full p-5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-3xl font-black text-sm uppercase tracking-widest shadow-xl shadow-blue-500/20 transition-all active:scale-95 flex items-center justify-center gap-3"
             >
               {isSubmitting ? (
                 <RefreshCw className="w-5 h-5 animate-spin" />

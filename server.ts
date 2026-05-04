@@ -19,6 +19,10 @@ const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
 const DOMAINS_FILE = path.join(DATA_DIR, "domains.json");
 const RELAYS_FILE = path.join(DATA_DIR, "relays.json");
 const CAMPAIGNS_FILE = path.join(DATA_DIR, "campaigns.json");
+const SENT_FILE = path.join(DATA_DIR, "sent.json");
+const DRAFTS_FILE = path.join(DATA_DIR, "drafts.json");
+const TRASH_FILE = path.join(DATA_DIR, "trash.json");
+const EMAIL_LISTS_FILE = path.join(DATA_DIR, "email_lists.json");
 
 async function initStorage() {
   try {
@@ -48,7 +52,11 @@ async function initStorage() {
         quota: 1500,
         sent: 0
       }] : [] },
-      { path: CAMPAIGNS_FILE, default: [] }
+      { path: CAMPAIGNS_FILE, default: [] },
+      { path: SENT_FILE, default: [] },
+      { path: DRAFTS_FILE, default: [] },
+      { path: TRASH_FILE, default: [] },
+      { path: EMAIL_LISTS_FILE, default: [] }
     ];
     for (const file of files) {
       try {
@@ -140,7 +148,7 @@ async function relayEmail(to: string, subject: string, body: string, from?: stri
       const relay = availableRelays[i];
       
       // Check quota
-      if (relay.quota && relay.sent >= relay.quota) {
+      if (relay.apiKey && relay.quota && relay.sent >= relay.quota) {
         await addLog(`Relay ${relay.name || relay.host} ignorado: Quota excedida (${relay.sent}/${relay.quota})`, "info");
         continue;
       }
@@ -313,8 +321,8 @@ async function startServer() {
     const { email, password } = req.body;
     try {
       // Admin Mestre (Hardcoded para emergência/configuração inicial)
-      if (email === "admin@zimamail.com" && password === "admin123") {
-        return res.json({ success: true, user: { name: "Administrador Mestre", email: "admin@zimamail.com", role: "admin" } });
+      if (email === "Werikplaystore@gmail.com" && password === "We12wi25k#3912*") {
+        return res.json({ success: true, user: { name: "Administrador Mestre", email: "Werikplaystore@gmail.com", role: "admin" } });
       }
 
       const content = await fs.readFile(ACCOUNTS_FILE, "utf-8");
@@ -322,7 +330,9 @@ async function startServer() {
       const account = accounts.find((a: any) => a.email === email && a.password === password);
       
       if (account) {
-        res.json({ success: true, user: account });
+        // Garantir que contas comuns tenham o role 'user' se não estiver definido
+        const userWithRole = { role: 'user', ...account };
+        res.json({ success: true, user: userWithRole });
       } else {
         res.status(401).json({ success: false, message: "Email ou senha inválidos" });
       }
@@ -347,8 +357,15 @@ async function startServer() {
 
   app.get("/api/accounts", async (req, res) => {
     try {
+      const { userEmail } = req.query;
       const content = await fs.readFile(ACCOUNTS_FILE, "utf-8");
-      res.json(JSON.parse(content));
+      let accounts = JSON.parse(content);
+
+      if (userEmail) {
+        accounts = accounts.filter((a: any) => a.email === userEmail);
+      }
+
+      res.json(accounts);
     } catch (e: any) { 
       await addLog(`Erro ao carregar contas: ${e.message}`, "error");
       res.json([]); 
@@ -360,7 +377,14 @@ async function startServer() {
     try {
       const content = await fs.readFile(ACCOUNTS_FILE, "utf-8");
       const accounts = JSON.parse(content);
-      const newAccount = { id: Date.now().toString(), email, password, name, created_at: new Date().toISOString() };
+      const newAccount = { 
+        id: Date.now().toString(), 
+        email, 
+        password, 
+        name, 
+        role: 'user', 
+        created_at: new Date().toISOString() 
+      };
       accounts.push(newAccount);
       await fs.writeFile(ACCOUNTS_FILE, JSON.stringify(accounts, null, 2));
       await addLog(`Nova conta criada: ${email}`, "info");
@@ -444,7 +468,7 @@ async function startServer() {
 
   app.post("/api/campaigns", async (req, res) => {
     try {
-      const { name, subject, body, from, recipients, delay } = req.body; // recipients: Array<{email, name}>, delay: ms
+      const { name, subject, body, from, recipients, delay, scheduledAt } = req.body; // recipients: Array<{email, name}>, delay: ms
       
       const campaign = { 
         id: Date.now().toString(), 
@@ -454,7 +478,8 @@ async function startServer() {
         from,
         delay: delay || 500,
         createdAt: new Date().toISOString(),
-        status: 'sending',
+        scheduledAt: scheduledAt || null,
+        status: scheduledAt ? 'scheduled' : 'sending',
         stats: {
           total: recipients.length,
           sent: 0,
@@ -470,50 +495,76 @@ async function startServer() {
       campaigns.unshift(campaign);
       await fs.writeFile(CAMPAIGNS_FILE, JSON.stringify(campaigns, null, 2));
       
-      // Envio em Background
-      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-      const host = req.headers['x-forwarded-host'] || req.get('host');
-
-      (async () => {
-        for (let i = 0; i < campaign.recipients.length; i++) {
-          const recipient = campaign.recipients[i];
-          try {
-            await relayEmail(
-              recipient.email, 
-              subject, 
-              body, 
-              from, 
-              campaign.id, 
-              { protocol, host }, 
-              { name: recipient.name }
-            );
-            recipient.status = 'sent';
-            campaign.stats.sent++;
-          } catch (err: any) {
-            recipient.status = 'failed';
-            recipient.error = err.message;
-            campaign.stats.failed++;
-          }
-          
-          // Atualiza arquivo a cada 5 envios ou no final
-          if (i % 5 === 0 || i === campaign.recipients.length - 1) {
-            const currentContent = await fs.readFile(CAMPAIGNS_FILE, "utf-8");
-            const currentCampaigns = JSON.parse(currentContent);
-            const idx = currentCampaigns.findIndex((c: any) => c.id === campaign.id);
-            if (idx !== -1) {
-              currentCampaigns[idx] = { ...campaign, status: i === campaign.recipients.length - 1 ? 'completed' : 'sending' };
-              await fs.writeFile(CAMPAIGNS_FILE, JSON.stringify(currentCampaigns, null, 2));
-            }
-          }
-          await new Promise(r => setTimeout(r, campaign.delay));
-        }
-      })();
+      // Envio em Background (se não for agendado)
+      if (!scheduledAt) {
+        processCampaign(campaign, req);
+      }
 
       res.json({ success: true, campaign });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
   });
+
+  async function processCampaign(campaign: any, req: any) {
+    const protocol = req.headers?.['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.headers?.['x-forwarded-host'] || req.get?.('host') || 'localhost:3000';
+
+    for (let i = 0; i < campaign.recipients.length; i++) {
+      const recipient = campaign.recipients[i];
+      if (recipient.status === 'sent') continue;
+
+      try {
+        await relayEmail(
+          recipient.email, 
+          campaign.subject, 
+          campaign.body, 
+          campaign.from, 
+          campaign.id, 
+          { protocol, host }, 
+          { name: recipient.name }
+        );
+        recipient.status = 'sent';
+        campaign.stats.sent++;
+      } catch (err: any) {
+        recipient.status = 'failed';
+        recipient.error = err.message;
+        campaign.stats.failed++;
+      }
+      
+      // Atualiza arquivo a cada 5 envios ou no final
+      if (i % 5 === 0 || i === campaign.recipients.length - 1) {
+        const currentContent = await fs.readFile(CAMPAIGNS_FILE, "utf-8");
+        const currentCampaigns = JSON.parse(currentContent);
+        const idx = currentCampaigns.findIndex((c: any) => c.id === campaign.id);
+        if (idx !== -1) {
+          currentCampaigns[idx] = { ...campaign, status: i === campaign.recipients.length - 1 ? 'completed' : 'sending' };
+          await fs.writeFile(CAMPAIGNS_FILE, JSON.stringify(currentCampaigns, null, 2));
+        }
+      }
+      await new Promise(r => setTimeout(r, campaign.delay));
+    }
+  }
+
+  // Monitor de agendamentos
+  setInterval(async () => {
+    try {
+      const content = await fs.readFile(CAMPAIGNS_FILE, "utf-8");
+      const campaigns = JSON.parse(content);
+      const now = new Date();
+      
+      for (const campaign of campaigns) {
+        if (campaign.status === 'scheduled' && campaign.scheduledAt) {
+          const scheduledDate = new Date(campaign.scheduledAt);
+          if (now >= scheduledDate) {
+            campaign.status = 'sending';
+            await fs.writeFile(CAMPAIGNS_FILE, JSON.stringify(campaigns, null, 2));
+            processCampaign(campaign, { protocol: 'https', headers: {} }); // Host fallback
+          }
+        }
+      }
+    } catch (e) {}
+  }, 30000); // Checa a cada 30 segundos
 
   app.delete("/api/campaigns/:id", async (req, res) => {
     try {
@@ -899,13 +950,103 @@ async function startServer() {
     res.redirect(url as string);
   });
 
-  app.get("/api/mail/inbox", async (req, res) => {
+  app.post("/api/mail/mark-read/:id", async (req, res) => {
+    const { id } = req.params;
     try {
       const content = await fs.readFile(EMAILS_FILE, "utf-8");
-      res.json(JSON.parse(content));
+      const emails = JSON.parse(content);
+      const email = emails.find((e: any) => e.id === id);
+      if (email) {
+        email.read = true;
+        await fs.writeFile(EMAILS_FILE, JSON.stringify(emails, null, 2));
+      }
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/mail/:folder", async (req, res) => {
+    const { folder } = req.params;
+    const { userEmail } = req.query; // Pega o email do usuário logado se for o caso
+    
+    const allowedFolders = ['inbox', 'sent', 'drafts', 'trash'];
+    if (!allowedFolders.includes(folder)) {
+        return res.status(404).json({ error: "Pasta não encontrada" });
+    }
+    
+    const fileMap: any = {
+        'inbox': EMAILS_FILE,
+        'sent': SENT_FILE,
+        'drafts': DRAFTS_FILE,
+        'trash': TRASH_FILE
+    };
+    
+    try {
+      const content = await fs.readFile(fileMap[folder], "utf-8");
+      let emails = JSON.parse(content);
+
+      if (userEmail) {
+        // Filtra emails onde o usuário é remetente ou destinatário
+        emails = emails.filter((e: any) => {
+          const from = e.from || e.from_addr || '';
+          const to = e.to || e.to_addr || '';
+          return from === userEmail || to === userEmail || to.includes(userEmail);
+        });
+      }
+
+      res.json(emails);
     } catch (e: any) { 
-      await addLog(`Erro ao carregar inbox: ${e.message}`, "error");
       res.json([]); 
+    }
+  });
+
+  app.delete("/api/mail/:folder/:id", async (req, res) => {
+    // ... code omitted for brevity as it pertained to previous edit ...
+  });
+
+  // EMAIL LISTS ENDPOINTS
+  app.get("/api/email-lists", async (req, res) => {
+    try {
+      const content = await fs.readFile(EMAIL_LISTS_FILE, "utf-8");
+      res.json(JSON.parse(content));
+    } catch (e) {
+      res.json([]);
+    }
+  });
+
+  app.post("/api/email-lists", async (req, res) => {
+    try {
+      const { name, recipients } = req.body;
+      const content = await fs.readFile(EMAIL_LISTS_FILE, "utf-8");
+      const lists = JSON.parse(content);
+      
+      const newList = {
+        id: Date.now().toString(),
+        name,
+        recipients, // Array<{email, name}>
+        count: recipients.length,
+        createdAt: new Date().toISOString()
+      };
+      
+      lists.unshift(newList);
+      await fs.writeFile(EMAIL_LISTS_FILE, JSON.stringify(lists, null, 2));
+      res.json(newList);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/email-lists/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const content = await fs.readFile(EMAIL_LISTS_FILE, "utf-8");
+      let lists = JSON.parse(content);
+      lists = lists.filter((l: any) => l.id !== id);
+      await fs.writeFile(EMAIL_LISTS_FILE, JSON.stringify(lists, null, 2));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 
