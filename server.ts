@@ -24,9 +24,26 @@ const DRAFTS_FILE = path.join(DATA_DIR, "drafts.json");
 const TRASH_FILE = path.join(DATA_DIR, "trash.json");
 const EMAIL_LISTS_FILE = path.join(DATA_DIR, "email_lists.json");
 
+// --- Configuração do Supabase ---
+const supabaseUrl = process.env.SUPABASE_URL || "";
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+let supabase: any = null;
+
+if (supabaseUrl && supabaseKey) {
+  try {
+    supabase = createClient(supabaseUrl, supabaseKey);
+    console.log("[STORAGE] Supabase conectado (Principal).");
+  } catch (e) {
+    console.error("[STORAGE] Erro ao conectar no Supabase:", e);
+  }
+}
+
 async function initStorage() {
   try {
+    // Força criação do diretório de dados para fallback
     await fs.mkdir(DATA_DIR, { recursive: true });
+    
+    // Lista de arquivos e seus valores padrão
     const files = [
       { path: EMAILS_FILE, default: [] },
       { path: ACCOUNTS_FILE, default: [] },
@@ -58,6 +75,7 @@ async function initStorage() {
       { path: TRASH_FILE, default: [] },
       { path: EMAIL_LISTS_FILE, default: [] }
     ];
+
     for (const file of files) {
       try {
         await fs.access(file.path);
@@ -65,45 +83,99 @@ async function initStorage() {
         await fs.writeFile(file.path, JSON.stringify(file.default));
       }
     }
+
+    // Inicialização do Supabase (Opcional - garante que tabelas básicas existam via fallback de código)
+    if (supabase) {
+      const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').single();
+      if (!settings) {
+        await supabase.from('settings').insert({
+          id: 'main',
+          domain: process.env.DEFAULT_DOMAIN || "amplifamarketing.com.br",
+          delivery_mode: process.env.DELIVERY_MODE || "internal"
+        });
+      }
+    }
+
   } catch (err) {
-    console.error("Erro ao inicializar pasta de dados:", err);
+    console.error("Erro ao inicializar armazenamento:", err);
   }
 }
 
 async function addLog(message: string, type: "info" | "error" | "smtp" | "track" = "info", metadata: any = {}) {
+  const logItem = {
+    id: Date.now().toString(),
+    timestamp: new Date().toISOString(),
+    message,
+    type,
+    metadata
+  };
+
   try {
+    // 1. Salva no Supabase (Primary)
+    if (supabase) {
+      await supabase.from('logs').insert([logItem]);
+    }
+
+    // 2. Salva no Local (Fallback / LIFO cache)
     const content = await fs.readFile(LOGS_FILE, "utf-8");
     const logs = JSON.parse(content);
-    logs.unshift({
-      id: Date.now().toString(),
-      timestamp: new Date().toISOString(),
-      message,
-      type,
-      ...metadata
-    });
+    logs.unshift(logItem);
     await fs.writeFile(LOGS_FILE, JSON.stringify(logs.slice(0, 100), null, 2));
   } catch (e) {
     console.error("Falha ao salvar log:", e);
   }
 }
 
-// --- Configuração do Supabase (Opcional) ---
-const supabaseUrl = process.env.SUPABASE_URL || "";
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-let supabase: any = null;
-
-if (supabaseUrl && supabaseKey) {
+// --- Helpers de Armazenamento Híbrido ---
+async function getSettings() {
+  if (supabase) {
+    const { data } = await supabase.from('settings').select('*').eq('id', 'main').single();
+    if (data) return data;
+  }
   try {
-    supabase = createClient(supabaseUrl, supabaseKey);
-    console.log("[STORAGE] Supabase conectado (Opcional).");
-  } catch (e) {
-    console.error("[STORAGE] Erro ao conectar no Supabase:", e);
+    return JSON.parse(await fs.readFile(SETTINGS_FILE, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+async function getRelays() {
+  if (supabase) {
+    const { data } = await supabase.from('relays').select('*');
+    if (data) return data;
+  }
+  try {
+    return JSON.parse(await fs.readFile(RELAYS_FILE, "utf-8"));
+  } catch {
+    return [];
+  }
+}
+
+async function updateRelayQuota(relayId: string) {
+  try {
+    if (supabase) {
+      // Usar RPC para incrementar de forma atômica se possível, ou select/update simples
+      const { data: relay } = await supabase.from('relays').select('sent').eq('id', relayId).single();
+      if (relay) {
+        await supabase.from('relays').update({ sent: (relay.sent || 0) + 1 }).eq('id', relayId);
+      }
+    }
+    
+    // Always update local sync
+    const currentRelays = JSON.parse(await fs.readFile(RELAYS_FILE, "utf-8"));
+    const relayIdx = currentRelays.findIndex((r: any) => r.id === relayId);
+    if (relayIdx !== -1) {
+      currentRelays[relayIdx].sent = (currentRelays[relayIdx].sent || 0) + 1;
+      await fs.writeFile(RELAYS_FILE, JSON.stringify(currentRelays, null, 2));
+    }
+  } catch (err) {
+    console.error("Erro ao atualizar quota do relay:", err);
   }
 }
 
 async function relayEmail(to: string, subject: string, body: string, from?: string, campaignId?: string, trackInfo: any = {}, personalization: any = {}) {
-  const settings = JSON.parse(await fs.readFile(SETTINGS_FILE, "utf-8"));
-  const relays = JSON.parse(await fs.readFile(RELAYS_FILE, "utf-8"));
+  const settings = await getSettings();
+  const relays = await getRelays();
   
   let success = false;
   let lastError = null;
@@ -212,16 +284,7 @@ async function relayEmail(to: string, subject: string, body: string, from?: stri
         success = true;
         
         // Update quota usage
-        try {
-          const currentRelays = JSON.parse(await fs.readFile(RELAYS_FILE, "utf-8"));
-          const relayIdx = currentRelays.findIndex((r: any) => r.id === relay.id);
-          if (relayIdx !== -1) {
-            currentRelays[relayIdx].sent = (currentRelays[relayIdx].sent || 0) + 1;
-            await fs.writeFile(RELAYS_FILE, JSON.stringify(currentRelays, null, 2));
-          }
-        } catch (err) {
-          console.error("Erro ao atualizar quota do relay:", err);
-        }
+        await updateRelayQuota(relay.id);
 
         await addLog(`Email ENVIADO: ${to} (via ${usedRelayName}) | De: ${fromAddr} | MsgID: ${info.messageId}`, "smtp");
         break; 
@@ -259,9 +322,18 @@ async function startServer() {
     authOptional: true,
     async onAuth(auth, session, callback) {
       try {
-        const content = await fs.readFile(ACCOUNTS_FILE, "utf-8");
-        const accounts = JSON.parse(content);
-        const account = accounts.find((a: any) => a.email === auth.username && a.password === auth.password);
+        let account = null;
+        if (supabase) {
+          const { data, error } = await supabase.from('accounts').select('*').eq('email', auth.username).eq('password', auth.password).single();
+          if (!error && data) account = data;
+        }
+
+        if (!account) {
+          const content = await fs.readFile(ACCOUNTS_FILE, "utf-8");
+          const accounts = JSON.parse(content);
+          account = accounts.find((a: any) => a.email === auth.username && a.password === auth.password);
+        }
+
         if (account) {
           return callback(null, { user: account });
         }
@@ -291,8 +363,6 @@ async function startServer() {
         // Se não autenticado, salva no INBOX (Recebimento padrão)
         const from = parsed.from?.text || "Desconhecido";
         try {
-          const content = await fs.readFile(EMAILS_FILE, "utf-8");
-          const emails = JSON.parse(content);
           const newEmail = {
             id: Date.now().toString(),
             from_addr: parsed.from?.text,
@@ -302,6 +372,13 @@ async function startServer() {
             received_at: new Date().toISOString(),
             read: false
           };
+
+          if (supabase) {
+            await supabase.from('emails').insert([newEmail]);
+          }
+
+          const content = await fs.readFile(EMAILS_FILE, "utf-8");
+          const emails = JSON.parse(content);
           emails.unshift(newEmail);
           await fs.writeFile(EMAILS_FILE, JSON.stringify(emails, null, 2));
           await addLog(`Entrada: Email recebido de ${from}`, "smtp");
@@ -321,13 +398,21 @@ async function startServer() {
     const { email, password } = req.body;
     try {
       // Admin Mestre (Hardcoded para emergência/configuração inicial)
-      if (email === "Werikplaystore@gmail.com" && password === "We12wi25k#3912*") {
+      if (email?.toLowerCase() === "werikplaystore@gmail.com" && password === "We12wi25k#3912*") {
         return res.json({ success: true, user: { name: "Administrador Mestre", email: "Werikplaystore@gmail.com", role: "admin" } });
       }
 
-      const content = await fs.readFile(ACCOUNTS_FILE, "utf-8");
-      const accounts = JSON.parse(content);
-      const account = accounts.find((a: any) => a.email === email && a.password === password);
+      let account = null;
+      if (supabase) {
+        const { data, error } = await supabase.from('accounts').select('*').eq('email', email).eq('password', password).single();
+        if (!error && data) account = data;
+      }
+
+      if (!account) {
+        const content = await fs.readFile(ACCOUNTS_FILE, "utf-8");
+        const accounts = JSON.parse(content);
+        account = accounts.find((a: any) => a.email === email && a.password === password);
+      }
       
       if (account) {
         // Garantir que contas comuns tenham o role 'user' se não estiver definido
@@ -347,6 +432,10 @@ async function startServer() {
 
   app.get("/api/logs", async (req, res) => {
     try {
+      if (supabase) {
+        const { data, error } = await supabase.from('logs').select('*').order('timestamp', { ascending: false }).limit(100);
+        if (!error) return res.json(data);
+      }
       const content = await fs.readFile(LOGS_FILE, "utf-8");
       res.json(JSON.parse(content));
     } catch (e: any) { 
@@ -358,11 +447,19 @@ async function startServer() {
   app.get("/api/accounts", async (req, res) => {
     try {
       const { userEmail } = req.query;
-      const content = await fs.readFile(ACCOUNTS_FILE, "utf-8");
-      let accounts = JSON.parse(content);
+      let accounts = [];
 
-      if (userEmail) {
-        accounts = accounts.filter((a: any) => a.email === userEmail);
+      if (supabase) {
+        let query = supabase.from('accounts').select('*');
+        if (userEmail) query = query.eq('email', userEmail);
+        const { data, error } = await query;
+        if (!error) accounts = data;
+      } else {
+        const content = await fs.readFile(ACCOUNTS_FILE, "utf-8");
+        accounts = JSON.parse(content);
+        if (userEmail) {
+          accounts = accounts.filter((a: any) => a.email === userEmail);
+        }
       }
 
       res.json(accounts);
@@ -375,8 +472,6 @@ async function startServer() {
   app.post("/api/accounts", async (req, res) => {
     const { email, password, name } = req.body;
     try {
-      const content = await fs.readFile(ACCOUNTS_FILE, "utf-8");
-      const accounts = JSON.parse(content);
       const newAccount = { 
         id: Date.now().toString(), 
         email, 
@@ -385,8 +480,22 @@ async function startServer() {
         role: 'user', 
         created_at: new Date().toISOString() 
       };
+
+      if (supabase) {
+        const { error: sbError } = await supabase.from('accounts').insert([newAccount]);
+        if (sbError) {
+          console.error("[SUPABASE ERROR] Falha ao criar conta:", sbError);
+          // Opcional: retornar erro se Supabase for obrigatório
+          // return res.status(500).json({ success: false, message: "Erro ao salvar no Supabase: " + sbError.message });
+        }
+      }
+
+      // Sync local
+      const content = await fs.readFile(ACCOUNTS_FILE, "utf-8");
+      const accounts = JSON.parse(content);
       accounts.push(newAccount);
       await fs.writeFile(ACCOUNTS_FILE, JSON.stringify(accounts, null, 2));
+
       await addLog(`Nova conta criada: ${email}`, "info");
       res.json({ success: true, account: newAccount });
     } catch (error: any) {
@@ -398,6 +507,11 @@ async function startServer() {
     try {
       const { id } = req.params;
       const { email, password, name } = req.body;
+      
+      if (supabase) {
+        await supabase.from('accounts').update({ email, password, name }).eq('id', id);
+      }
+
       const content = await fs.readFile(ACCOUNTS_FILE, "utf-8");
       let accounts = JSON.parse(content);
       const idx = accounts.findIndex((a: any) => a.id === id);
@@ -418,6 +532,9 @@ async function startServer() {
   app.delete("/api/accounts/:id", async (req, res) => {
     try {
       const { id } = req.params;
+      if (supabase) {
+        await supabase.from('accounts').delete().eq('id', id);
+      }
       const content = await fs.readFile(ACCOUNTS_FILE, "utf-8");
       let accounts = JSON.parse(content);
       accounts = accounts.filter((a: any) => a.id !== id);
@@ -430,13 +547,15 @@ async function startServer() {
 
   app.get("/api/settings", async (req, res) => {
     try {
-      const content = await fs.readFile(SETTINGS_FILE, "utf-8");
-      res.json(JSON.parse(content));
+      res.json(await getSettings());
     } catch (e) { res.json({}); }
   });
 
   app.post("/api/settings", async (req, res) => {
     try {
+      if (supabase) {
+        await supabase.from('settings').upsert({ id: 'main', ...req.body });
+      }
       await fs.writeFile(SETTINGS_FILE, JSON.stringify(req.body, null, 2));
       await addLog("Configurações atualizadas", "info");
       res.json({ success: true });
@@ -447,6 +566,10 @@ async function startServer() {
 
   app.get("/api/domains", async (req, res) => {
     try {
+      if (supabase) {
+        const { data, error } = await supabase.from('domains').select('domain');
+        if (!error) return res.json(data.map((d: any) => d.domain));
+      }
       const content = await fs.readFile(DOMAINS_FILE, "utf-8");
       res.json(JSON.parse(content));
     } catch (e) { res.json([]); }
@@ -461,6 +584,10 @@ async function startServer() {
 
   app.get("/api/campaigns", async (req, res) => {
     try {
+      if (supabase) {
+        const { data, error } = await supabase.from('campaigns').select('*').order('created_at', { ascending: false });
+        if (!error) return res.json(data);
+      }
       const content = await fs.readFile(CAMPAIGNS_FILE, "utf-8");
       res.json(JSON.parse(content));
     } catch (e) { res.json([]); }
@@ -468,7 +595,7 @@ async function startServer() {
 
   app.post("/api/campaigns", async (req, res) => {
     try {
-      const { name, subject, body, from, recipients, delay, scheduledAt } = req.body; // recipients: Array<{email, name}>, delay: ms
+      const { name, subject, body, from, recipients, delay, scheduledAt } = req.body; 
       
       const campaign = { 
         id: Date.now().toString(), 
@@ -477,8 +604,8 @@ async function startServer() {
         body,
         from,
         delay: delay || 500,
-        createdAt: new Date().toISOString(),
-        scheduledAt: scheduledAt || null,
+        createdAt: new Date().toISOString(), // This will map to created_at in SQL
+        scheduledAt: scheduledAt || null,    // scheduled_at
         status: scheduledAt ? 'scheduled' : 'sending',
         stats: {
           total: recipients.length,
@@ -490,12 +617,28 @@ async function startServer() {
         recipients: recipients.map((r: any) => ({ ...r, status: 'pending' }))
       };
 
+      if (supabase) {
+        // Map fields to SQL snake_case if necessary, or let Supabase handle it if JS camelCase matches SQL defined above
+        await supabase.from('campaigns').insert([{
+          id: campaign.id,
+          name: campaign.name,
+          subject: campaign.subject,
+          body: campaign.body,
+          from: campaign.from,
+          delay: campaign.delay,
+          scheduled_at: campaign.scheduledAt,
+          status: campaign.status,
+          stats: campaign.stats,
+          recipients: campaign.recipients,
+          created_at: campaign.createdAt
+        }]);
+      }
+
       const content = await fs.readFile(CAMPAIGNS_FILE, "utf-8");
       const campaigns = JSON.parse(content);
       campaigns.unshift(campaign);
       await fs.writeFile(CAMPAIGNS_FILE, JSON.stringify(campaigns, null, 2));
       
-      // Envio em Background (se não for agendado)
       if (!scheduledAt) {
         processCampaign(campaign, req);
       }
@@ -532,13 +675,22 @@ async function startServer() {
         campaign.stats.failed++;
       }
       
-      // Atualiza arquivo a cada 5 envios ou no final
       if (i % 5 === 0 || i === campaign.recipients.length - 1) {
+        const nextStatus = i === campaign.recipients.length - 1 ? 'completed' : 'sending';
+        
+        if (supabase) {
+          await supabase.from('campaigns').update({ 
+            status: nextStatus,
+            stats: campaign.stats,
+            recipients: campaign.recipients
+          }).eq('id', campaign.id);
+        }
+
         const currentContent = await fs.readFile(CAMPAIGNS_FILE, "utf-8");
         const currentCampaigns = JSON.parse(currentContent);
         const idx = currentCampaigns.findIndex((c: any) => c.id === campaign.id);
         if (idx !== -1) {
-          currentCampaigns[idx] = { ...campaign, status: i === campaign.recipients.length - 1 ? 'completed' : 'sending' };
+          currentCampaigns[idx] = { ...campaign, status: nextStatus };
           await fs.writeFile(CAMPAIGNS_FILE, JSON.stringify(currentCampaigns, null, 2));
         }
       }
@@ -569,6 +721,9 @@ async function startServer() {
   app.delete("/api/campaigns/:id", async (req, res) => {
     try {
       const { id } = req.params;
+      if (supabase) {
+        await supabase.from('campaigns').delete().eq('id', id);
+      }
       const content = await fs.readFile(CAMPAIGNS_FILE, "utf-8");
       let campaigns = JSON.parse(content);
       campaigns = campaigns.filter((c: any) => c.id !== id);
@@ -588,6 +743,9 @@ async function startServer() {
         apiKey: req.body.apiKey || '',
         ...req.body 
       };
+      if (supabase) {
+        await supabase.from('relays').insert([relay]);
+      }
       const content = await fs.readFile(RELAYS_FILE, "utf-8");
       const relays = JSON.parse(content);
       relays.push(relay);
@@ -812,6 +970,9 @@ async function startServer() {
   app.post("/api/domains", async (req, res) => {
     try {
       const { domain } = req.body;
+      if (supabase) {
+        await supabase.from('domains').upsert({ domain });
+      }
       const content = await fs.readFile(DOMAINS_FILE, "utf-8");
       const domains = JSON.parse(content);
       if (!domains.includes(domain)) {
@@ -828,6 +989,9 @@ async function startServer() {
   app.delete("/api/domains/:domain", async (req, res) => {
     try {
       const { domain } = req.params;
+      if (supabase) {
+        await supabase.from('domains').delete().eq('domain', domain);
+      }
       const content = await fs.readFile(DOMAINS_FILE, "utf-8");
       let domains = JSON.parse(content);
       domains = domains.filter((d: string) => d !== domain);
@@ -858,25 +1022,29 @@ async function startServer() {
       await addLog(`EMAIL ABERTO: ${recipient} (Rastreio: ${emailId})`, "track", { opened: true, trackerId: emailId, recipient, ip, ua: userAgent });
       
       if (emailId.startsWith('c_')) {
-        const campaignId = parts[1];
+        const campaignId = parts[parts.length - 3] || parts[1]; // Adjust for id structure
+        
+        if (supabase) {
+          const { data: campaign } = await supabase.from('campaigns').select('*').eq('id', campaignId).single();
+          if (campaign) {
+            const stats = campaign.stats || { total: 0, sent: 0, failed: 0, opens: 0, clicks: 0 };
+            stats.opens = (stats.opens || 0) + 1;
+            const events = campaign.events || [];
+            events.unshift({ type: 'open', recipient, at: new Date().toISOString(), ip, ua: userAgent });
+            await supabase.from('campaigns').update({ stats, events }).eq('id', campaignId);
+          }
+        }
         
         const content = await fs.readFile(CAMPAIGNS_FILE, "utf-8");
         let campaigns = JSON.parse(content);
-        const campaign = campaigns.find((c: any) => c.id === campaignId);
+        const campaignIdx = campaigns.findIndex((c: any) => c.id === campaignId);
         
-        if (campaign) {
+        if (campaignIdx !== -1) {
+          const campaign = campaigns[campaignIdx];
           if (!campaign.stats) campaign.stats = { total: 0, sent: 0, failed: 0, opens: 0, clicks: 0 };
           campaign.stats.opens = (campaign.stats.opens || 0) + 1;
-          
           if (!campaign.events) campaign.events = [];
-          campaign.events.unshift({
-            type: 'open',
-            recipient,
-            at: new Date().toISOString(),
-            ip,
-            ua: userAgent
-          });
-
+          campaign.events.unshift({ type: 'open', recipient, at: new Date().toISOString(), ip, ua: userAgent });
           await fs.writeFile(CAMPAIGNS_FILE, JSON.stringify(campaigns, null, 2));
         }
       }
@@ -953,6 +1121,9 @@ async function startServer() {
   app.post("/api/mail/mark-read/:id", async (req, res) => {
     const { id } = req.params;
     try {
+      if (supabase) {
+        await supabase.from('emails').update({ read: true }).eq('id', id);
+      }
       const content = await fs.readFile(EMAILS_FILE, "utf-8");
       const emails = JSON.parse(content);
       const email = emails.find((e: any) => e.id === id);
@@ -968,31 +1139,40 @@ async function startServer() {
 
   app.get("/api/mail/:folder", async (req, res) => {
     const { folder } = req.params;
-    const { userEmail } = req.query; // Pega o email do usuário logado se for o caso
+    const { userEmail } = req.query; 
     
     const allowedFolders = ['inbox', 'sent', 'drafts', 'trash'];
     if (!allowedFolders.includes(folder)) {
         return res.status(404).json({ error: "Pasta não encontrada" });
     }
     
-    const fileMap: any = {
-        'inbox': EMAILS_FILE,
-        'sent': SENT_FILE,
-        'drafts': DRAFTS_FILE,
-        'trash': TRASH_FILE
-    };
-    
     try {
-      const content = await fs.readFile(fileMap[folder], "utf-8");
-      let emails = JSON.parse(content);
+      let emails = [];
+      
+      if (supabase && folder === 'inbox') {
+        let query = supabase.from('emails').select('*').order('received_at', { ascending: false });
+        if (userEmail) {
+          query = query.or(`to_addr.eq.${userEmail},to_addr.ilike.%${userEmail}%`);
+        }
+        const { data, error } = await query;
+        if (!error) emails = data;
+      } else {
+        const fileMap: any = {
+          'inbox': EMAILS_FILE,
+          'sent': SENT_FILE,
+          'drafts': DRAFTS_FILE,
+          'trash': TRASH_FILE
+        };
+        const content = await fs.readFile(fileMap[folder], "utf-8");
+        emails = JSON.parse(content);
 
-      if (userEmail) {
-        // Filtra emails onde o usuário é remetente ou destinatário
-        emails = emails.filter((e: any) => {
-          const from = e.from || e.from_addr || '';
-          const to = e.to || e.to_addr || '';
-          return from === userEmail || to === userEmail || to.includes(userEmail);
-        });
+        if (userEmail) {
+          emails = emails.filter((e: any) => {
+            const from = e.from || e.from_addr || '';
+            const to = e.to || e.to_addr || '';
+            return from === userEmail || to === userEmail || to.includes(userEmail);
+          });
+        }
       }
 
       res.json(emails);
@@ -1008,6 +1188,10 @@ async function startServer() {
   // EMAIL LISTS ENDPOINTS
   app.get("/api/email-lists", async (req, res) => {
     try {
+      if (supabase) {
+        const { data, error } = await supabase.from('email_lists').select('*').order('created_at', { ascending: false });
+        if (!error) return res.json(data);
+      }
       const content = await fs.readFile(EMAIL_LISTS_FILE, "utf-8");
       res.json(JSON.parse(content));
     } catch (e) {
@@ -1018,9 +1202,6 @@ async function startServer() {
   app.post("/api/email-lists", async (req, res) => {
     try {
       const { name, recipients } = req.body;
-      const content = await fs.readFile(EMAIL_LISTS_FILE, "utf-8");
-      const lists = JSON.parse(content);
-      
       const newList = {
         id: Date.now().toString(),
         name,
@@ -1028,7 +1209,13 @@ async function startServer() {
         count: recipients.length,
         createdAt: new Date().toISOString()
       };
+
+      if (supabase) {
+        await supabase.from('email_lists').insert([newList]);
+      }
       
+      const content = await fs.readFile(EMAIL_LISTS_FILE, "utf-8");
+      const lists = JSON.parse(content);
       lists.unshift(newList);
       await fs.writeFile(EMAIL_LISTS_FILE, JSON.stringify(lists, null, 2));
       res.json(newList);
@@ -1040,6 +1227,9 @@ async function startServer() {
   app.delete("/api/email-lists/:id", async (req, res) => {
     try {
       const { id } = req.params;
+      if (supabase) {
+        await supabase.from('email_lists').delete().eq('id', id);
+      }
       const content = await fs.readFile(EMAIL_LISTS_FILE, "utf-8");
       let lists = JSON.parse(content);
       lists = lists.filter((l: any) => l.id !== id);
@@ -1066,12 +1256,25 @@ async function startServer() {
 
   app.get("/api/stats", async (req, res) => {
     try {
-      const emails = JSON.parse(await fs.readFile(EMAILS_FILE, "utf-8"));
-      const accounts = JSON.parse(await fs.readFile(ACCOUNTS_FILE, "utf-8"));
+      let accountsCount = 0;
+      let emailsReceived = 0;
+
+      if (supabase) {
+        const { count: aCount } = await supabase.from('accounts').select('*', { count: 'exact', head: true });
+        const { count: eCount } = await supabase.from('emails').select('*', { count: 'exact', head: true });
+        accountsCount = aCount || 0;
+        emailsReceived = eCount || 0;
+      } else {
+        const emails = JSON.parse(await fs.readFile(EMAILS_FILE, "utf-8"));
+        const accounts = JSON.parse(await fs.readFile(ACCOUNTS_FILE, "utf-8"));
+        accountsCount = accounts.length;
+        emailsReceived = emails.length;
+      }
+
       res.json({
-        activeAccounts: accounts.length,
-        emailsReceived: emails.length,
-        storageUsed: "Local",
+        activeAccounts: accountsCount,
+        emailsReceived: emailsReceived,
+        storageUsed: supabase ? "Supabase Cloud" : "Local",
         status: "Online"
       });
     } catch (e: any) { 

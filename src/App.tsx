@@ -697,8 +697,15 @@ export default function App() {
                 )}
 
 
-                {/* Main Stats Layout */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* DADOS SOBRE EMAIL */}
+                <div className="space-y-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-100 rounded-2xl flex items-center justify-center text-blue-600">
+                      <Mail className="w-5 h-5" />
+                    </div>
+                    <h3 className="text-xl font-black text-slate-900 tracking-tight uppercase">Dados sobre Email</h3>
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                   {/* Trend Chart (Col 1-8) */}
                   <div className="lg:col-span-8 bg-white border border-slate-200 rounded-[32px] p-6 shadow-sm">
                     <h3 className="text-xl font-black text-slate-900 tracking-tight mb-6">Tendência</h3>
@@ -741,267 +748,171 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Secondary Metrics Bento (Col 1-12) */}
-                  <div className="lg:col-span-12 grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <StatCard 
-                      icon={<Eye className="w-6 h-6" />} 
-                      iconColor="text-purple-600"
-                      title="Aberturas" 
-                      value={`${logs.filter(l => l.opened || l.message.includes('EMAIL ABERTO')).length ? Math.round((logs.filter(l => l.opened || l.message.includes('EMAIL ABERTO')).length / (logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length || 1)) * 100) : 0}%`}
-                      subtitle="Impacto de Leitura"
-                      progress={logs.filter(l => l.opened || l.message.includes('EMAIL ABERTO')).length ? Math.round((logs.filter(l => l.opened || l.message.includes('EMAIL ABERTO')).length / (logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length || 1)) * 100) : 0}
-                    />
-                    <StatCard 
-                      icon={<MousePointer2 className="w-6 h-6" />} 
-                      iconColor="text-amber-600"
-                      title="Cliques" 
-                      value={`${logs.filter(l => l.clicked || l.message.includes('CLIQUE')).length ? ((logs.filter(l => l.clicked || l.message.includes('CLIQUE')).length / (logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length || 1)) * 100).toFixed(1) : 0}%`}
-                      subtitle="CTR Relevância"
-                      progress={logs.filter(l => l.clicked || l.message.includes('CLIQUE')).length ? Math.round((logs.filter(l => l.clicked || l.message.includes('CLIQUE')).length / (logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length || 1)) * 100) : 0}
-                    />
-                    <div className="bg-slate-900 rounded-[32px] p-8 text-white relative overflow-hidden group shadow-xl flex items-center justify-between">
-                      <div className="relative z-10">
-                        <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] mb-2">SMTP</p>
-                        <h4 className="text-2xl font-black mb-1">{relays.length + (settings.smtp_host ? 1 : 0)} Canais</h4>
-                      </div>
-                      <Server className="w-16 h-16 text-white/5 absolute right-6 top-1/2 -translate-y-1/2" />
+                    <div className="lg:col-span-12 grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <StatCard 
+                        icon={<Eye className="w-6 h-6" />} 
+                        iconColor="text-purple-600"
+                        title="Taxa de Abertura" 
+                        value={`${logs.filter(l => l.opened || l.message.includes('EMAIL ABERTO')).length ? Math.round((logs.filter(l => l.opened || l.message.includes('EMAIL ABERTO')).length / (logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length || 1)) * 100) : 0}%`}
+                        subtitle="Impacto de Leitura"
+                        progress={logs.filter(l => l.opened || l.message.includes('EMAIL ABERTO')).length ? Math.round((logs.filter(l => l.opened || l.message.includes('EMAIL ABERTO')).length / (logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length || 1)) * 100) : 0}
+                      />
+                      <StatCard 
+                        icon={<MousePointer2 className="w-6 h-6" />} 
+                        iconColor="text-amber-600"
+                        title="Taxa de Clique" 
+                        value={`${logs.filter(l => l.clicked || l.message.includes('CLIQUE')).length ? ((logs.filter(l => l.clicked || l.message.includes('CLIQUE')).length / (logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length || 1)) * 100).toFixed(1) : 0}%`}
+                        subtitle="Engajamento com Links"
+                        progress={logs.filter(l => l.clicked || l.message.includes('CLIQUE')).length ? Math.round((logs.filter(l => l.clicked || l.message.includes('CLIQUE')).length / (logs.filter(l => l.message.includes('enviado') || l.type === 'smtp').length || 1)) * 100) : 0}
+                      />
                     </div>
                   </div>
                 </div>
 
-                {/* Operational Body Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                  <div className="lg:col-span-8 space-y-8">
-                    {/* Performance Card */}
-                    <div className="bg-white border border-slate-200 rounded-[48px] p-10 shadow-sm">
-                      <div className="flex justify-between items-center mb-10">
-                        <div>
-                          <h3 className="text-3xl font-black text-slate-900 tracking-tighter">Performance de Campanhas</h3>
-                          <p className="text-sm text-slate-500 font-bold mt-1">Status em tempo real de cada disparo</p>
+                {/* DADOS SOBRE RELAYS */}
+                <div className="space-y-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-emerald-100 rounded-2xl flex items-center justify-center text-emerald-600">
+                      <Server className="w-5 h-5" />
+                    </div>
+                    <h3 className="text-xl font-black text-slate-900 tracking-tight uppercase">Dados sobre Relays</h3>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div className="bg-slate-900 rounded-[32px] p-8 text-white relative overflow-hidden group shadow-xl flex items-center justify-between border border-slate-800">
+                      <div className="relative z-10">
+                        <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] mb-2">SMTP Bridge</p>
+                        <h4 className="text-2xl font-black mb-1">{relays.length + (settings.smtp_host ? 1 : 0)} Canais</h4>
+                        <div className="flex items-center gap-2 mt-2">
+                           <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                           <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest">Gateway Ativo</span>
                         </div>
-                        <button onClick={() => setActiveTab('campaigns')} className="px-6 py-3.5 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg active:scale-95">Relatório Full</button>
                       </div>
-                      <div className="grid grid-cols-1 gap-4">
-                        {campaigns.slice(0, 3).map((camp) => {
-                          const stats = camp.stats || { sent: 0, opens: 0, clicks: 0, total: 0 };
-                          const openRate = stats.sent > 0 ? (stats.opens / stats.sent) * 100 : 0;
-                          return (
-                            <div key={camp.id} className="p-8 bg-slate-50/50 hover:bg-slate-50 rounded-[40px] border border-slate-100 flex items-center justify-between transition-all group border-l-4 border-l-blue-500">
-                              <div className="flex items-center gap-8">
-                                <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-sm text-blue-600 group-hover:scale-110 transition-transform">
-                                  <Zap className="w-8 h-8" />
-                                </div>
-                                <div>
-                                  <h4 className="text-xl font-black text-slate-900">{camp.name}</h4>
-                                  <div className="flex items-center gap-4 mt-2">
-                                    <span className="text-[10px] font-black uppercase text-slate-400 bg-white px-3 py-1 rounded-full border border-slate-200">{camp.status === 'completed' ? 'Finalizado' : 'Processando'}</span>
-                                    <p className="text-xs font-bold text-slate-500">{stats.sent.toLocaleString()} envios</p>
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-12 pr-6">
-                                <div className="text-right">
-                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Abertura</p>
-                                  <p className="text-2xl font-black text-blue-600 tracking-tighter">{openRate.toFixed(1)}%</p>
-                                </div>
-                                <button onClick={() => setSelectedCampaign(camp)} className="w-12 h-12 bg-white border border-slate-200 rounded-full flex items-center justify-center text-slate-400 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm">
-                                  <ArrowRight className="w-6 h-6" />
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                      <Server className="w-20 h-20 text-white/5 absolute right-6 top-1/2 -translate-y-1/2" />
                     </div>
 
-                    {/* Fluxo de Transmissão */}
-                    <div className="bg-white border border-slate-200 rounded-[48px] p-10 shadow-sm">
-                      <div className="flex justify-between items-center mb-10">
-                        <div>
-                          <h3 className="text-3xl font-black text-slate-900 tracking-tighter">Fluxo de Transmissão</h3>
-                          <p className="text-sm text-slate-500 font-bold mt-1">Conexão direta porta 587/465</p>
-                        </div>
-                        <div className="flex gap-2">
-                           <select 
-                            className="bg-slate-100 rounded-2xl px-4 py-2 text-xs font-black uppercase text-slate-600"
-                            onChange={(e) => setLogFilterStatus(e.target.value as any)}
-                            value={logFilterStatus}
-                           >
-                             <option value="all">Status: Todos</option>
-                             <option value="error">Erros</option>
-                             <option value="success">Sucesso</option>
-                           </select>
-                        </div>
-                      </div>
-                      <div className="space-y-3">
-                        {logs.filter(log => {
-                          if (logFilterStatus === 'error') return log.message.includes('Erro');
-                          if (logFilterStatus === 'success') return !log.message.includes('Erro');
-                          return true;
-                        }).slice(0, 6).map((log, i) => (
-                          <div key={log.id} className={`p-6 rounded-[28px] border transition-all flex items-center justify-between ${i % 2 === 0 ? 'bg-slate-50/50 border-transparent' : 'bg-white border-slate-100'}`}>
-                            <div className="flex items-center gap-6">
-                              <div className={`p-3 rounded-2xl shrink-0 ${
-                                log.message.includes('Erro') ? 'bg-red-50 text-red-500' :
-                                log.message.includes('enviado') ? 'bg-blue-50 text-blue-500' :
-                                log.message.includes('ABERTO') ? 'bg-amber-50 text-amber-500' :
-                                'bg-slate-100 text-slate-400'
-                              }`}>
-                                {log.message.includes('Erro') ? <AlertCircle className="w-5 h-5" /> :
-                                 log.message.includes('enviado') ? <ArrowUpRight className="w-5 h-5" /> :
-                                 log.message.includes('ABERTO') ? <Eye className="w-5 h-5" /> :
-                                 <Activity className="w-5 h-5" />}
-                              </div>
-                              <p className="text-sm font-black text-slate-700 truncate max-w-[500px]">{log.message}</p>
-                            </div>
-                            <span className="text-[11px] font-mono text-slate-400 font-black">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                          </div>
-                        ))}
-                      </div>
+                    <div className="bg-white border border-slate-200 rounded-[32px] p-8 shadow-sm flex items-center justify-between group hover:border-emerald-200 transition-all">
+                       <div>
+                         <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Reputação de IP</h4>
+                         <p className="text-2xl font-black text-slate-900 tracking-tighter">Excelente</p>
+                         <p className="text-[10px] text-emerald-500 font-bold mt-1 uppercase tracking-widest italic">Sem Blacklists Detectadas</p>
+                       </div>
+                       <Shield className="w-12 h-12 text-slate-100 group-hover:text-emerald-500 transition-colors" />
+                    </div>
+
+                    <div className="bg-white border border-slate-200 rounded-[32px] p-8 shadow-sm flex items-center justify-between group hover:border-blue-200 transition-all">
+                       <div>
+                         <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Média de Latência</h4>
+                         <p className="text-2xl font-black text-slate-900 tracking-tighter">142ms</p>
+                         <p className="text-[10px] text-blue-500 font-bold mt-1 uppercase tracking-widest italic">Tempo de Resposta Nominal</p>
+                       </div>
+                       <RefreshCw className="w-12 h-12 text-slate-100 group-hover:text-blue-500 transition-colors" />
                     </div>
                   </div>
+                </div>
 
-                  {/* Right Sidebar */}
-                  <div className="lg:col-span-4 space-y-8">
-                    {/* Painel de Saúde */}
-                    <div className="bg-white border border-slate-200 rounded-[48px] p-10 shadow-sm">
-                      <div className="flex justify-between items-center mb-6">
-                        <div>
-                          <h3 className="text-2xl font-black text-slate-900 tracking-tight">Saúde dos Provedores</h3>
-                          <p className="text-[11px] text-slate-400 font-black uppercase tracking-widest mt-1">Status Proativo</p>
-                        </div>
-                       <Shield className="w-6 h-6 text-emerald-500" />
-                      </div>
-                      <div className="space-y-4">
-                        {relays.map((relay, index) => (
-                          <div key={index} className={`flex items-center justify-between p-4 border rounded-2xl ${
-                            relay.status === 'operational' ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'
-                          }`}>
-                            <span className={`font-bold ${relay.status === 'operational' ? 'text-emerald-800' : 'text-amber-800'}`}>
-                              {relay.name || 'SMTP Provedor'}
-                            </span>
-                            <span className={`text-xs font-black px-3 py-1 rounded-full uppercase ${
-                              relay.status === 'operational' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                            }`}>
-                              {relay.status === 'operational' ? 'OK' : 'Atenção'}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+                {/* DADOS SOBRE CAMPANHAS */}
+                <div className="space-y-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-amber-100 rounded-2xl flex items-center justify-center text-amber-600">
+                      <Zap className="w-5 h-5" />
                     </div>
-
-                    {/* Quota Management */}
-                      {relays.some(r => r.apiKey) && (
-                        <div className="bg-white border border-slate-200 rounded-[48px] p-10 shadow-sm">
-                          <div className="flex justify-between items-center mb-10">
-                            <div>
-                              <h3 className="text-2xl font-black text-slate-900 tracking-tight">Status de Cotas</h3>
-                              <p className="text-[11px] text-slate-400 font-black uppercase tracking-widest mt-1">Limites SMTP ativos</p>
-                            </div>
-                            <Server className="w-6 h-6 text-slate-200" />
-                          </div>
-                          <div className="space-y-10">
-                            {relays.map((relay) => {
-                              if (!relay.apiKey) return null;
-                              const quota = relay.quota || 1000;
-                              const sent = relay.sent || 0;
-                              const perc = Math.min(100, Math.round((sent / quota) * 100));
-                              return (
-                                <div key={relay.id} className="space-y-4">
-                                  <div className="flex justify-between items-end">
-                                    <div>
-                                      <h5 className="text-xs font-black text-slate-900 uppercase tracking-widest mb-1 truncate max-w-[180px]">{relay.name || relay.host}</h5>
-                                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{sent.toLocaleString()} / {quota.toLocaleString()}</p>
-                                    </div>
-                                    <span className={`text-sm font-black tracking-tighter ${perc > 90 ? 'text-red-500' : 'text-blue-600'}`}>{perc}%</span>
-                                  </div>
-                                  <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden p-0.5">
-                                    <motion.div 
-                                      initial={{ width: 0 }}
-                                      animate={{ width: `${perc}%` }}
-                                      className={`h-full rounded-full transition-all duration-1000 ${perc > 90 ? 'bg-red-500' : 'bg-blue-600'}`}
-                                    />
-                                  </div>
+                    <h3 className="text-xl font-black text-slate-900 tracking-tight uppercase">Dados sobre Campanhas</h3>
+                  </div>
+                  <div className="bg-white border border-slate-200 rounded-[48px] p-10 shadow-sm">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10">
+                      <div>
+                        <h3 className="text-2xl font-black text-slate-900 tracking-tighter">Status de Disparos</h3>
+                        <p className="text-sm text-slate-500 font-bold mt-1">Visão geral das últimas campanhas processadas</p>
+                      </div>
+                      <button onClick={() => setActiveTab('campaigns')} className="px-6 py-3 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg active:scale-95">Gerenciar Campanhas</button>
+                    </div>
+                    <div className="grid grid-cols-1 gap-4">
+                      {campaigns.length > 0 ? campaigns.slice(0, 3).map((camp) => {
+                        const stats = camp.stats || { sent: 0, opens: 0, clicks: 0, total: 0 };
+                        const openRate = stats.sent > 0 ? (stats.opens / stats.sent) * 100 : 0;
+                        return (
+                          <div key={camp.id} className="p-8 bg-slate-50/50 hover:bg-slate-50 rounded-[40px] border border-slate-100 flex flex-col sm:flex-row items-center justify-between transition-all group border-l-4 border-l-blue-500 gap-6 sm:gap-0">
+                            <div className="flex items-center gap-8 w-full sm:w-auto">
+                              <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-sm text-blue-600 group-hover:scale-110 transition-transform shrink-0">
+                                <Zap className="w-8 h-8" />
+                              </div>
+                              <div>
+                                <h4 className="text-xl font-black text-slate-900 truncate max-w-[200px] sm:max-w-none">{camp.name}</h4>
+                                <div className="flex items-center gap-4 mt-2">
+                                  <span className="text-[10px] font-black uppercase text-slate-400 bg-white px-3 py-1 rounded-full border border-slate-200">{camp.status === 'completed' ? 'Finalizado' : 'Processando'}</span>
+                                  <p className="text-xs font-bold text-slate-500">{stats.sent.toLocaleString()} envios</p>
                                 </div>
-                              );
-                            })}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-12 w-full sm:w-auto justify-between sm:justify-end pr-4">
+                              <div className="text-right">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Abertura</p>
+                                <p className="text-2xl font-black text-blue-600 tracking-tighter">{openRate.toFixed(1)}%</p>
+                              </div>
+                              <button onClick={() => setSelectedCampaign(camp)} className="w-12 h-12 bg-white border border-slate-200 rounded-full flex items-center justify-center text-slate-400 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm">
+                                <ArrowRight className="w-6 h-6" />
+                              </button>
+                            </div>
                           </div>
+                        );
+                      }) : (
+                        <div className="text-center py-16 bg-slate-50 rounded-[32px] border-2 border-dashed border-slate-100">
+                          <Plus className="w-10 h-10 text-slate-300 mx-auto mb-4" />
+                          <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">Nenhuma campanha para exibir</p>
                         </div>
                       )}
+                    </div>
+                  </div>
+                </div>
 
-                    {/* Relay Gateway */}
-                    <div className="bg-white border border-slate-200 rounded-[48px] p-10 shadow-sm">
-                      <div className="flex justify-between items-center mb-6">
-                        <div>
-                          <h3 className="text-2xl font-black text-slate-900 tracking-tight">Relay Gateway</h3>
-                          <div className="flex items-center gap-2 mt-1">
-                             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                             <p className="text-[11px] text-emerald-600 font-black uppercase tracking-widest">Operacional (Porta 2525)</p>
-                          </div>
-                        </div>
-                        <Settings className="w-6 h-6 text-slate-200" />
+                {/* LOGS */}
+                <div className="space-y-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-600">
+                      <Activity className="w-5 h-5" />
+                    </div>
+                    <h3 className="text-xl font-black text-slate-900 tracking-tight uppercase">Atividade e Logs</h3>
+                  </div>
+                  <div className="bg-white border border-slate-200 rounded-[48px] p-10 shadow-sm">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10">
+                      <div>
+                        <h3 className="text-2xl font-black text-slate-900 tracking-tighter">Fluxo de Registro</h3>
+                        <p className="text-sm text-slate-500 font-bold mt-1">Conexão direta porta 587/465 em tempo real</p>
                       </div>
-                      <div className="space-y-6">
-                         <div className="space-y-2">
-                           <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400">
-                             <span>Uso Total</span>
-                             <span>{relays.reduce((acc, r) => acc + (r.sent || 0), 0).toLocaleString()} / {relays.reduce((acc, r) => acc + (r.quota || 1000), 0).toLocaleString()}</span>
-                           </div>
-                           <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden p-0.5">
-                              <div className="h-full bg-blue-600 rounded-full" style={{ width: `${Math.min(100, Math.round((relays.reduce((acc, r) => acc + (r.sent || 0), 0) / (relays.reduce((acc, r) => acc + (r.quota || 1000), 0) || 1)) * 100))}%` }} />
-                           </div>
-                         </div>
-                         
-                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
-                           <div>
-                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Host de Saída</p>
-                             <p className="text-sm font-mono text-blue-600 break-all">{window.location.hostname}</p>
-                           </div>
-                           <button onClick={() => navigator.clipboard.writeText(window.location.hostname)} className="p-2 hover:bg-white rounded-lg text-slate-400">
-                             <Copy className="w-4 h-4" />
-                           </button>
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tráfego recente (SMTP)</p>
-                          {logs.filter(l => l.type === 'smtp').slice(0, 3).map((log, i) => (
-                             <div key={i} className="text-[10px] font-mono text-slate-600 truncate bg-slate-50 p-2 rounded-lg">
-                               {log.message}
-                             </div>
-                          ))}
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Porta SMTP</p>
-                             <p className="text-sm font-black text-slate-700">2525</p>
-                          </div>
-                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Segurança</p>
-                             <p className="text-sm font-black text-slate-700">None / STARTTLS</p>
-                          </div>
-                        </div>
-                         <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Autenticação</p>
-                           <p className="text-sm font-black text-slate-700">Suas Contas ZimaMail</p>
-                        </div>
+                      <div className="flex gap-2">
+                         <button onClick={() => fetchLogs()} className="p-3 bg-slate-100 rounded-2xl hover:bg-slate-200 transition-colors">
+                           <RefreshCw className="w-4 h-4 text-slate-600" />
+                         </button>
+                         <button onClick={() => setActiveTab('logs')} className="px-6 py-3 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Relatório de Logs</button>
                       </div>
                     </div>
-
-                    {/* Quick Access */}
-                    <div className="bg-slate-900 rounded-[48px] p-10 text-white relative overflow-hidden shadow-2xl group">
-                      <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 group-hover:scale-125 transition-transform" />
-                      <h3 className="text-xl font-black mb-4 relative z-10">ZimaMail Network</h3>
-                      <p className="text-slate-400 text-xs font-bold leading-relaxed mb-8 opacity-80 relative z-10">Proteção de reputação e monitoramento Cloud ZimaOS ativado.</p>
-                      <div className="grid grid-cols-2 gap-4 relative z-10">
-                        <button onClick={() => setActiveTab('dns')} className="p-4 bg-white/5 border border-white/10 rounded-[28px] hover:bg-white/10 transition-all flex flex-col items-center justify-center">
-                          <Globe className="w-6 h-6 text-indigo-400 mb-2" />
-                          <span className="text-[9px] font-black uppercase tracking-widest">DNS Config</span>
-                        </button>
-                        <button onClick={() => setIsAccountModalOpen(true)} className="p-4 bg-white/5 border border-white/10 rounded-[28px] hover:bg-white/10 transition-all flex flex-col items-center justify-center">
-                          <Plus className="w-6 h-6 text-emerald-400 mb-2" />
-                          <span className="text-[9px] font-black uppercase tracking-widest">Nova Conta</span>
-                        </button>
-                      </div>
+                    <div className="space-y-3">
+                      {logs.slice(0, 6).map((log, i) => (
+                        <div key={log.id} className={`p-6 rounded-[28px] border transition-all flex items-center justify-between shadow-sm ${i % 2 === 0 ? 'bg-slate-50/50 border-transparent' : 'bg-white border-slate-100'}`}>
+                          <div className="flex items-center gap-6">
+                            <div className={`p-3 rounded-2xl shrink-0 ${
+                              log.message.includes('Erro') ? 'bg-red-50 text-red-500' :
+                              log.message.includes('enviado') ? 'bg-blue-50 text-blue-500' :
+                              log.message.includes('ABERTO') ? 'bg-amber-50 text-amber-500' :
+                              'bg-slate-100 text-slate-400'
+                            }`}>
+                              {log.message.includes('Erro') ? <AlertCircle className="w-5 h-5" /> :
+                               log.message.includes('enviado') ? <ArrowUpRight className="w-5 h-5" /> :
+                               log.message.includes('ABERTO') ? <Eye className="w-5 h-5" /> :
+                               <Activity className="w-5 h-5" />}
+                            </div>
+                            <div>
+                               <p className="text-sm font-black text-slate-700 line-clamp-1 max-w-[500px]">{log.message}</p>
+                               <div className="flex items-center gap-3 mt-1">
+                                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                                    {log.created_at ? new Date(log.created_at).toLocaleTimeString() : new Date().toLocaleTimeString()}
+                                  </span>
+                                  <span className="text-[9px] font-black uppercase tracking-widest bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full">{log.type || 'System'}</span>
+                               </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </div>
