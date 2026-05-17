@@ -3,8 +3,15 @@ import { createClient } from '@supabase/supabase-js';
 // Acesso seguro ao ZimaOS Runtime Env ou variáveis de Build
 const zimaEnv = (window as any).ZIMA_ENV || {};
 
-const url = zimaEnv.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL || '';
-const key = zimaEnv.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+let url = (zimaEnv.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL || '').trim();
+const key = (zimaEnv.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+
+if (url) {
+  url = url.replace(/['"]+/g, '').replace(/\/$/, '');
+  if (!url.startsWith('http')) {
+    url = `https://${url}`;
+  }
+}
 
 export const supabase = (url && key) ? createClient(url, key) : null;
 

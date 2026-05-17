@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "0.4.2",
+  "version": "0.4.4",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -24,6 +24,7 @@
     "lucide-react": "^0.546.0",
     "mailparser": "^3.9.8",
     "motion": "^12.38.0",
+    "node-fetch": "^3.3.2",
     "nodemailer": "^8.0.7",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",

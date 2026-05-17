@@ -39,7 +39,7 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            werikoliveira/email:0.4.2
+            werikoliveira/email:latest
             werikoliveira/email:${{ steps.package_version.outputs.VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

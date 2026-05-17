@@ -44,10 +44,13 @@ import {
   Copy,
   Contact2,
   ListChecks,
-  Save
+  Save,
+  Key,
+  Code
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
+import { EMAIL_TEMPLATES, EmailTemplate } from './templates';
 
 // Tipos simplificados
 interface Stats {
@@ -71,9 +74,13 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'mail' | 'dns' | 'accounts' | 'logs' | 'settings' | 'campaigns' | 'lists'>('overview');
+  const [connectivityError, setConnectivityError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'overview' | 'mail' | 'dns' | 'accounts' | 'logs' | 'settings' | 'campaigns' | 'lists' | 'api'>('overview');
   const [activeMailFolder, setActiveMailFolder] = useState<'inbox' | 'sent' | 'drafts' | 'trash'>('inbox');
   const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [apiKeys, setApiKeys] = useState<any[]>([]);
+  const [keysLoading, setKeysLoading] = useState(false);
+  const [keyError, setKeyError] = useState<string | null>(null);
   const [editAccount, setEditAccount] = useState<any>(null);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [isRelayModalOpen, setIsRelayModalOpen] = useState(false);
@@ -81,6 +88,8 @@ export default function App() {
   const [isListModalOpen, setIsListModalOpen] = useState(false);
   const [selectedEmail, setSelectedEmail] = useState<any>(null);
   const [accounts, setAccounts] = useState<MailAccount[]>([]);
+  const [ipHealth, setIpHealth] = useState<any>(null);
+  const [loadingHealth, setLoadingHealth] = useState(false);
   const [filterAccount, setFilterAccount] = useState<string>('all');
   const [emailLists, setEmailLists] = useState<any[]>([]);
   const [newCampaignFormData, setNewCampaignFormData] = useState<any>({
@@ -117,10 +126,27 @@ export default function App() {
   const fetchSettings = useCallback(async () => {
     try {
       const res = await fetch('/api/settings');
+      if (!res.ok) throw new Error('Falha ao conectar com o servidor');
       const data = await res.json();
       setSettings(data);
+      setConnectivityError(null);
     } catch (err) {
       console.error('Erro ao buscar settings:', err);
+      // Verificar se o erro é de DNS no backend
+      try {
+        const hRes = await fetch('/api/health-check');
+        const hData = await hRes.json();
+        const dnsEntries = Object.entries(hData.dns);
+        const failedEntry = dnsEntries.find(([host, status]: any) => status.status === 'ERROR' && host.includes('supabase'));
+        
+        if (failedEntry) {
+           setConnectivityError(`ERRO DE CONEXÃO: O host do Supabase (${failedEntry[0]}) não pôde ser resolvido. Verifique se o projeto não está pausado ou se a URL está correta.`);
+        } else {
+           setConnectivityError('ERRO DE SERVIDOR: Não foi possível carregar as configurações. Verifique as chaves de API.');
+        }
+      } catch(e) {
+        setConnectivityError('ERRO DE REDE: Verifique sua conexão com a internet.');
+      }
     }
   }, []);
 
@@ -259,6 +285,77 @@ export default function App() {
       setIsFetchingCampaigns(false);
     }
   }, []);
+
+  const fetchApiKeys = useCallback(async () => {
+    setKeysLoading(true);
+    setKeyError(null);
+    try {
+      const res = await fetch('/api/keys');
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || errorData.message || 'Falha ao carregar chaves');
+      }
+      const data = await res.json();
+      setApiKeys(data || []);
+    } catch (e: any) {
+      console.error('Erro ao buscar chaves:', e);
+      setKeyError(e.message);
+    } finally {
+      setKeysLoading(false);
+    }
+  }, []);
+
+  const fetchIpHealth = useCallback(async () => {
+    setLoadingHealth(true);
+    try {
+      const res = await fetch('/api/health/blacklist');
+      if (res.ok) {
+        const data = await res.json();
+        setIpHealth(data);
+      }
+    } catch (e) {
+      console.error("Erro ao buscar saúde do IP:", e);
+    } finally {
+      setLoadingHealth(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchIpHealth();
+    const interval = setInterval(fetchIpHealth, 300000); // 5 min
+    return () => clearInterval(interval);
+  }, [fetchIpHealth]);
+
+  const createApiKey = async (name: string) => {
+    try {
+      const res = await fetch('/api/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, permissions: ['read', 'write'] })
+      });
+      const data = await res.json();
+      fetchApiKeys();
+      return data; // Contém a chave 'key' original (zm_...)
+    } catch (e) {
+      console.error('Erro ao criar chave:', e);
+      return null;
+    }
+  };
+
+  const deleteApiKey = async (id: string) => {
+    try {
+      await fetch('/api/keys/' + id, { method: 'DELETE' });
+      fetchApiKeys();
+    } catch (e) {
+      console.error('Erro ao deletar chave:', e);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'api') {
+      fetchApiKeys();
+    }
+  }, [activeTab, fetchApiKeys]);
 
   const deleteEmail = async (folder: string, id: string) => {
     try {
@@ -526,6 +623,29 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-500/30">
+      <AnimatePresence>
+        {connectivityError && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="bg-red-600 text-white px-6 py-3 font-black text-[10px] tracking-widest uppercase flex items-center justify-center gap-3 overflow-hidden sticky top-0 z-[100] shadow-2xl"
+          >
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{connectivityError}</span>
+            <button 
+              onClick={() => {
+                setConnectivityError(null);
+                fetchSettings();
+              }}
+              className="ml-4 hover:bg-white/20 p-2 rounded-lg transition-colors border border-white/20"
+            >
+              <RefreshCw className="w-3 h-3" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Sidebar navigation for desktop */}
       <nav className="hidden md:flex fixed left-0 top-0 h-full w-20 bg-white border-r border-slate-200 flex-col items-center py-8 z-50 shadow-sm">
         <div className="p-3 bg-blue-600 rounded-2xl shadow-lg shadow-blue-500/20 mb-10">
@@ -578,6 +698,12 @@ export default function App() {
                 onClick={() => setActiveTab('logs')}
                 icon={<Activity className="w-6 h-6" />}
                 label="Logs"
+              />
+              <NavButton 
+                active={activeTab === 'api'} 
+                onClick={() => setActiveTab('api')}
+                icon={<Key className="w-6 h-6" />}
+                label="API"
               />
               <NavButton 
                 active={activeTab === 'settings'} 
@@ -790,13 +916,39 @@ export default function App() {
                       <Server className="w-20 h-20 text-white/5 absolute right-6 top-1/2 -translate-y-1/2" />
                     </div>
 
-                    <div className="bg-white border border-slate-200 rounded-[32px] p-8 shadow-sm flex items-center justify-between group hover:border-emerald-200 transition-all">
+                    <div className={`bg-white border border-slate-200 rounded-[32px] p-8 shadow-sm flex items-center justify-between group transition-all ${ipHealth?.listedCount > 0 ? 'hover:border-red-200' : 'hover:border-emerald-200'}`}>
                        <div>
                          <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Reputação de IP</h4>
-                         <p className="text-2xl font-black text-slate-900 tracking-tighter">Excelente</p>
-                         <p className="text-[10px] text-emerald-500 font-bold mt-1 uppercase tracking-widest italic">Sem Blacklists Detectadas</p>
+                         <div className="flex items-center gap-2">
+                           <p className="text-2xl font-black text-slate-900 tracking-tighter">
+                             {loadingHealth ? 'Verificando...' : (ipHealth?.status || 'Excelente')}
+                           </p>
+                           {loadingHealth && <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />}
+                         </div>
+                         <p className={`text-[10px] font-bold mt-1 uppercase tracking-widest italic ${ipHealth?.listedCount > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                           {ipHealth?.listedCount > 0 
+                             ? `Listado em ${ipHealth.listedCount} blacklists` 
+                             : 'Sem Blacklists Detectadas'}
+                         </p>
+                         {ipHealth?.ip && (
+                           <p className="text-[9px] text-slate-400 mt-2 font-mono uppercase tracking-widest">
+                             {ipHealth.ip} • <span className={ipHealth.ptr === 'Não configurado' ? 'text-red-400 bg-red-50 px-1 rounded' : 'text-slate-400'}>{ipHealth.ptr}</span>
+                           </p>
+                         )}
                        </div>
-                       <Shield className="w-12 h-12 text-slate-100 group-hover:text-emerald-500 transition-colors" />
+                       <div className="flex flex-col items-center gap-2">
+                        {ipHealth?.listedCount > 0 ? (
+                          <AlertCircle className="w-12 h-12 text-red-500 scale-110" />
+                        ) : (
+                          <Shield className={`w-12 h-12 transition-colors ${loadingHealth ? 'text-slate-200' : 'text-slate-100 group-hover:text-emerald-500'}`} />
+                        )}
+                        <button 
+                          onClick={() => fetchIpHealth()}
+                          className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] hover:text-blue-500 transition-colors"
+                        >
+                          Atualizar
+                        </button>
+                       </div>
                     </div>
 
                     <div className="bg-white border border-slate-200 rounded-[32px] p-8 shadow-sm flex items-center justify-between group hover:border-blue-200 transition-all">
@@ -989,7 +1141,7 @@ export default function App() {
                     const from = email.from || email.from_addr || '';
                     return from === filterAccount;
                   }).map(email => (
-                    <button 
+                    <div 
                       key={email.id}
                       onClick={async () => {
                         setSelectedEmail(email);
@@ -1002,7 +1154,7 @@ export default function App() {
                           fetch(trackingIdMatch[1]);
                         }
                       }}
-                      className={`w-full p-4 border-b border-slate-50 text-left hover:bg-slate-50 transition-colors ${selectedEmail?.id === email.id ? 'bg-blue-50/50 border-l-4 border-l-blue-600' : ''}`}
+                      className={`w-full p-4 border-b border-slate-50 text-left hover:bg-slate-50 transition-colors cursor-pointer ${selectedEmail?.id === email.id ? 'bg-blue-50/50 border-l-4 border-l-blue-600' : ''}`}
                     >
                       <div className="flex justify-between items-center mb-1">
                         <span className={`text-sm ${!email.read ? 'font-bold text-slate-900' : 'text-slate-600'}`}>{email.from_addr || email.from}</span>
@@ -1021,7 +1173,7 @@ export default function App() {
                       </div>
                       <p className={`text-xs truncate ${!email.read ? 'font-bold text-slate-800' : 'text-slate-500'}`}>{email.subject}</p>
                       <p className="text-[10px] text-slate-400 truncate mt-1">{email.body?.replace(/<[^>]*>/g, '').substring(0, 100)}</p>
-                    </button>
+                    </div>
                   ))}
                 </div>
 
@@ -1596,6 +1748,158 @@ export default function App() {
               </motion.div>
             )}
 
+            {activeTab === 'api' && isAdmin && (
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="p-8 max-w-5xl mx-auto">
+                <div className="flex justify-between items-center mb-8">
+                  <div>
+                    <h2 className="text-3xl font-black text-slate-800 tracking-tight">Chaves de API</h2>
+                    <p className="text-sm text-slate-400 font-black uppercase tracking-widest mt-1">Conecte outras ferramentas ao seu Gateway</p>
+                  </div>
+                  <button 
+                    onClick={async () => {
+                      const name = prompt('Dê um nome para esta chave (ex: Zapier, Automação Marketing):');
+                      if (name) {
+                        const newKey = await createApiKey(name);
+                        if (newKey) {
+                          alert(`Chave de API criada com sucesso!\n\nNOME: ${newKey.name}\nCHAVE: ${newKey.key}\n\nAVISO: Guarde esta chave agora. Ela não será exibida novamente por segurança.`);
+                        }
+                      }
+                    }}
+                    className="flex items-center gap-3 bg-blue-600 text-white px-6 py-4 rounded-2xl font-black text-xs tracking-widest uppercase hover:scale-105 active:scale-95 transition-all shadow-xl shadow-blue-500/20"
+                  >
+                    <Plus className="w-5 h-5" />
+                    Gerar Nova Chave
+                  </button>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-[32px] overflow-hidden shadow-sm relative min-h-[300px]">
+                  {keysLoading && (
+                    <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-10 flex items-center justify-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    </div>
+                  )}
+
+                  {keyError && (
+                    <div className="p-8 text-center">
+                      <div className="inline-flex items-center justify-center p-4 bg-red-50 rounded-2xl mb-4">
+                        <AlertCircle className="w-8 h-8 text-red-500" />
+                      </div>
+                      <h3 className="font-black text-slate-800 mb-2">Erro ao carregar chaves</h3>
+                      <p className="text-sm text-slate-500 mb-6">{keyError}</p>
+                      <button 
+                        onClick={() => fetchApiKeys()}
+                        className="px-6 py-3 bg-slate-800 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-700 transition-all"
+                      >
+                        Tentar Novamente
+                      </button>
+                    </div>
+                  )}
+
+                  {!keyError && (
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200">
+                          <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Nome / App</th>
+                          <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Permissões</th>
+                          <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Último Uso</th>
+                          <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Criada em</th>
+                          <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {apiKeys.map((k: any) => (
+                          <tr key={k.id} className="hover:bg-slate-50 transition-colors group">
+                            <td className="px-8 py-6">
+                              <div className="flex items-center gap-3">
+                                <div className="p-2 bg-blue-50 rounded-lg">
+                                  <Key className="w-4 h-4 text-blue-600" />
+                                </div>
+                                <span className="font-bold text-slate-800">{k.name}</span>
+                              </div>
+                            </td>
+                            <td className="px-8 py-6">
+                              <div className="flex gap-1">
+                                {k.permissions.map((p: string) => (
+                                  <span key={p} className="px-2 py-0.5 bg-slate-100 text-slate-500 text-[9px] font-black uppercase rounded">
+                                    {p}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="px-8 py-6">
+                              <span className="text-xs text-slate-500 font-medium">
+                                {k.last_used_at ? new Date(k.last_used_at).toLocaleString() : 'Nunca usada'}
+                              </span>
+                            </td>
+                            <td className="px-8 py-6">
+                              <span className="text-xs text-slate-400">
+                                {new Date(k.created_at).toLocaleDateString()}
+                              </span>
+                            </td>
+                            <td className="px-8 py-6 text-right">
+                              <button 
+                                onClick={() => {
+                                  if (confirm(`Deseja realmente revogar a chave "${k.name}"? Todas as integrações usando esta chave pararão de funcionar.`)) {
+                                    deleteApiKey(k.id);
+                                  }
+                                }}
+                                className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                                title="Revogar Chave"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {apiKeys.length === 0 && !keysLoading && (
+                          <tr>
+                            <td colSpan={5} className="px-8 py-20 text-center">
+                              <div className="flex flex-col items-center opacity-20">
+                                <Key className="w-12 h-12 mb-4" />
+                                <p className="font-bold text-slate-500 uppercase tracking-widest text-xs">Nenhuma chave de API gerada</p>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                <div className="mt-12 bg-blue-900 text-white rounded-[40px] p-10 relative overflow-hidden shadow-2xl">
+                  <div className="absolute top-0 right-0 p-10 opacity-10">
+                    <Code className="w-48 h-48" />
+                  </div>
+                  <div className="relative z-10 max-w-2xl">
+                    <h3 className="text-2xl font-black mb-4">Documentação Rápida</h3>
+                    <p className="text-blue-100 mb-8 leading-relaxed">
+                      Use sua chave de API no header <b>x-api-key</b> de todas as requisições. 
+                      O endereço base do seu gateway é o endereço desta página.
+                    </p>
+                    
+                    <div className="space-y-6">
+                      <div>
+                        <p className="text-[10px] font-black text-blue-300 uppercase mb-2 tracking-widest">Enviar um Email (POST)</p>
+                        <div className="bg-black/30 p-4 rounded-xl font-mono text-[11px] overflow-x-auto border border-white/5">
+                          curl -X POST {window.location.origin}/api/mail/send \<br/>
+                          &nbsp;&nbsp;-H "x-api-key: SUA_CHAVE" \<br/>
+                          &nbsp;&nbsp;-H "Content-Type: application/json" \<br/>
+                          &nbsp;&nbsp;-d '{"{"}"to": "destinatario@email.com", "subject": "Olá", "body": "Conteúdo HTML"{"}"}'
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className="text-[10px] font-black text-blue-300 uppercase mb-2 tracking-widest">Listar Emails Recebidos (GET)</p>
+                        <div className="bg-black/30 p-4 rounded-xl font-mono text-[11px] overflow-x-auto border border-white/5">
+                          curl -H "x-api-key: SUA_CHAVE" {window.location.origin}/api/mail/inbox
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
             {activeTab === 'settings' && isAdmin && (
               <motion.div 
                 key="settings"
@@ -2140,6 +2444,7 @@ function RelayModal({ isOpen, onClose, onSuccess, initialData }: { isOpen: boole
     apiKey: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialData && isOpen) {
@@ -2149,11 +2454,12 @@ function RelayModal({ isOpen, onClose, onSuccess, initialData }: { isOpen: boole
         port: initialData.port || '587',
         user: initialData.user || '',
         pass: initialData.pass || '',
-        apiKey: initialData.apiKey || ''
+        apiKey: initialData.api_key || ''
       });
     } else {
       setFormData({ name: '', host: '', port: '587', user: '', pass: '', apiKey: '' });
     }
+    setError(null);
   }, [initialData, isOpen]);
 
   if (!isOpen) return null;
@@ -2161,6 +2467,7 @@ function RelayModal({ isOpen, onClose, onSuccess, initialData }: { isOpen: boole
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setError(null);
     try {
       const url = initialData ? `/api/relays/${initialData.id}` : '/api/relays';
       const method = initialData ? 'PUT' : 'POST';
@@ -2172,15 +2479,18 @@ function RelayModal({ isOpen, onClose, onSuccess, initialData }: { isOpen: boole
           ...formData
         })
       });
-      if (res.ok) {
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
         onSuccess();
         onClose();
         if (!initialData) setFormData({ name: '', host: '', port: '587', user: '', pass: '' });
       } else {
-        alert('Erro ao salvar relay.');
+        setError(data.message || 'Erro ao salvar relay.');
       }
-    } catch (err) {
-      alert('Erro de conexão.');
+    } catch (err: any) {
+      setError('Erro de conexão com o servidor: ' + err.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -2282,6 +2592,13 @@ function RelayModal({ isOpen, onClose, onSuccess, initialData }: { isOpen: boole
                 />
               </div>
             </div>
+
+            {error && (
+              <div className="mx-8 mb-4 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-1">
+                <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
+                <p className="text-[11px] font-bold text-red-600 leading-relaxed">{error}</p>
+              </div>
+            )}
           </div>
           
           <div className="p-6 bg-slate-50 flex justify-end gap-3 border-t border-slate-100">
@@ -2440,6 +2757,7 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts, emailLists, initi
   initialData?: any
 }) {
   const [step, setStep] = useState(1);
+  const [showTemplates, setShowTemplates] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     from: accounts[0]?.email || '',
@@ -2452,18 +2770,42 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts, emailLists, initi
   });
 
   useEffect(() => {
-    if (isOpen && initialData) {
-      setFormData(prev => ({ 
-        ...prev, 
-        ...initialData,
-        from: initialData.from || accounts[0]?.email || ''
-      }));
+    if (isOpen) {
+      if (initialData) {
+        setFormData(prev => ({ 
+          ...prev, 
+          ...initialData,
+          from: initialData.from || accounts[0]?.email || ''
+        }));
+      } else {
+        setFormData({
+          name: '',
+          from: accounts[0]?.email || '',
+          subject: '',
+          body: '',
+          recipients: '',
+          delay: 2,
+          scheduledAt: '',
+          selectedListId: ''
+        });
+        setStep(1);
+      }
     }
   }, [isOpen, initialData, accounts]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
+
+  const selectTemplate = (template: EmailTemplate) => {
+    setFormData(prev => ({
+      ...prev,
+      subject: template.subject,
+      body: template.body
+    }));
+    setShowTemplates(false);
+    setStep(2);
+  };
 
   const handleListChange = (listId: string) => {
     const list = emailLists.find(l => l.id === listId);
@@ -2546,8 +2888,12 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts, emailLists, initi
               <Zap className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-black text-xl text-slate-900 tracking-tight">Nova Campanha</h3>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Passo {step} de 2 — {step === 1 ? 'Configuração' : 'Conteúdo'}</p>
+              <h3 className="font-black text-xl text-slate-900 tracking-tight">
+                {showTemplates ? 'Modelos Profissionais' : 'Nova Campanha'}
+              </h3>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
+                {showTemplates ? 'Escolha um modelo para começar' : `Passo ${step} de 2 — ${step === 1 ? 'Configuração' : 'Conteúdo'}`}
+              </p>
             </div>
           </div>
           <button onClick={onClose} className="p-3 hover:bg-slate-200 rounded-2xl text-slate-400 transition-all">
@@ -2555,8 +2901,49 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts, emailLists, initi
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
-          {step === 1 ? (
+        {showTemplates ? (
+          <div className="flex-1 overflow-y-auto p-8 bg-slate-50/30">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-10">
+              {EMAIL_TEMPLATES.map((template) => (
+                <motion.div 
+                  key={template.id}
+                  whileHover={{ y: -4 }}
+                  onClick={() => selectTemplate(template)}
+                  className="bg-white border border-slate-200 rounded-[32px] p-6 cursor-pointer hover:border-blue-500 shadow-sm hover:shadow-xl transition-all group"
+                >
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-slate-50 rounded-2xl text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
+                        <Mail className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-900 uppercase text-xs tracking-tight">{template.name}</h4>
+                        <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-black uppercase tracking-tighter">
+                          {template.category}
+                        </span>
+                      </div>
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-blue-500 transition-all" />
+                  </div>
+                  <div className="p-4 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200 group-hover:bg-white group-hover:border-blue-100 transition-all">
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Assunto Preview:</p>
+                    <p className="text-xs text-slate-600 truncate font-medium">{template.subject}</p>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+            <div className="sticky bottom-0 -mx-8 -mb-8 p-6 bg-gradient-to-t from-white via-white to-transparent pt-12 flex justify-center">
+              <button 
+                onClick={() => setShowTemplates(false)}
+                className="px-8 py-3 bg-white border border-slate-200 rounded-2xl text-slate-500 font-bold text-xs uppercase tracking-widest hover:bg-slate-50 shadow-sm"
+              >
+                Voltar à Edição Livre
+              </button>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
+            {step === 1 ? (
             <div className="p-10 space-y-8">
                <div className="space-y-4">
                  <label className="block text-xs font-black text-slate-400 uppercase ml-1">Configuração de Envio</label>
@@ -2647,8 +3034,18 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts, emailLists, initi
             </div>
           ) : (
             <div className="p-10 space-y-8">
+               <div className="flex justify-between items-center mb-2">
+                  <label className="block text-xs font-black text-slate-400 uppercase ml-1">Conteúdo do E-mail</label>
+                  <button 
+                    type="button"
+                    onClick={() => setShowTemplates(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-100 transition-all border border-blue-100"
+                  >
+                    <Copy className="w-4 h-4" /> Escolher Modelo Pronto
+                  </button>
+               </div>
                <div className="space-y-2">
-                 <label className="block text-xs font-black text-slate-400 uppercase ml-1">Assunto do E-mail</label>
+                 <label className="block text-[10px] font-black text-slate-400 uppercase ml-1">Assunto do E-mail</label>
                  <input 
                    required
                    value={formData.subject}
@@ -2658,7 +3055,7 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts, emailLists, initi
                  />
                </div>
                <div className="space-y-2">
-                 <label className="block text-xs font-black text-slate-400 uppercase ml-1">Mensagem (HTML Suportado)</label>
+                 <label className="block text-[10px] font-black text-slate-400 uppercase ml-1">Mensagem (HTML Suportado)</label>
                  <textarea 
                    required
                    value={formData.body}
@@ -2709,9 +3106,10 @@ function CampaignModal({ isOpen, onClose, onSuccess, accounts, emailLists, initi
             </div>
           </div>
         </form>
-      </motion.div>
-    </div>
-  );
+      )}
+    </motion.div>
+  </div>
+);
 }
 
 function Login({ onLogin }: { onLogin: (user: any) => void }) {
@@ -2824,6 +3222,13 @@ function Login({ onLogin }: { onLogin: (user: any) => void }) {
 
         <p className="text-center mt-10 text-slate-500 text-sm font-medium">
           Sistema Seguro ZimaMail &copy; 2024
+          <br/>
+          <button 
+            onClick={() => alert("DICA: As credenciais padrão estão no arquivo server.ts (initStorage). O administrador mestre é werikplaystore@gmail.com")}
+            className="mt-2 text-[10px] text-slate-300 hover:text-blue-400 uppercase tracking-tighter"
+          >
+            Esqueceu a senha de administrador?
+          </button>
         </p>
       </motion.div>
     </div>

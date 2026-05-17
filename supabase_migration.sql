@@ -1,6 +1,9 @@
 -- SUPABASE MIGRATION SCRIPT
 -- Copy and paste this into your Supabase SQL Editor
 
+-- QUICK FIX: Se você já criou as tabelas e está recebendo erro de coluna faltando
+ALTER TABLE IF EXISTS settings ADD COLUMN IF NOT EXISTS app_name TEXT DEFAULT 'ZimaMail';
+
 -- 1. Table: accounts
 CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY,
@@ -101,6 +104,7 @@ CREATE TABLE IF NOT EXISTS sent (
 -- 10. Table: settings
 CREATE TABLE IF NOT EXISTS settings (
   id TEXT PRIMARY KEY DEFAULT 'main',
+  app_name TEXT DEFAULT 'ZimaMail',
   smtp_host TEXT,
   smtp_port INTEGER DEFAULT 587,
   smtp_user TEXT,
@@ -118,8 +122,35 @@ CREATE TABLE IF NOT EXISTS trash (
   deleted_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 12. Table: api_keys
+CREATE TABLE IF NOT EXISTS api_keys (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  key TEXT NOT NULL UNIQUE,
+  permissions TEXT[] DEFAULT '{read,write}',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  last_used_at TIMESTAMPTZ
+);
+
 -- Initial accounts (Based on hardcoded values or previous data)
 INSERT INTO accounts (id, email, password, name, role) VALUES ('1', 'werikplaystore@gmail.com', 'We12wi25k#3912*', 'Werik', 'admin') ON CONFLICT DO NOTHING;
 
 -- Initial settings
-INSERT INTO settings (id, domain) VALUES ('main', 'amplifamarketing.com.br') ON CONFLICT DO NOTHING;
+INSERT INTO settings (id, app_name, domain) VALUES ('main', 'ZimaMail', 'amplifamarketing.com.br') ON CONFLICT DO NOTHING;
+
+-- ENABLE RLS (Row Level Security)
+ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE domains ENABLE ROW LEVEL SECURITY;
+ALTER TABLE drafts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE email_lists ENABLE ROW LEVEL SECURITY;
+ALTER TABLE emails ENABLE ROW LEVEL SECURITY;
+ALTER TABLE logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE relays ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sent ENABLE ROW LEVEL SECURITY;
+ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE trash ENABLE ROW LEVEL SECURITY;
+
+-- Note: Since you are likely using the SERVICE_ROLE_KEY in the backend, 
+-- it bypasses RLS. If you use the ANON_KEY in the frontend, you must create policies.
